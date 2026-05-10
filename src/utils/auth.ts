@@ -6,11 +6,19 @@ import { PrismaClient } from "../generated/prisma/client";
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
+const c = (color: string, msg: string) => `\x1b[${color}m${msg}\x1b[0m`;
+
 export const auth = betterAuth({
     database: prismaAdapter(prisma, {
         provider: "postgresql",
     }),
     emailAndPassword: {
         enabled: true,
+    },
+    logger: {
+        level: "debug",
+        log: (level, message, ...args) => {
+            console.log(c("36", `[better-auth:${level}]`), message, ...args);
+        },
     },
 });
