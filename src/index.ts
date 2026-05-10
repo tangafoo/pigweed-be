@@ -1,9 +1,15 @@
 import { Hono } from 'hono'
+import { auth } from './utils/auth'
 
 const app = new Hono()
 
 app.get('/', (c) => {
-  return c.text('Hello Hono!')
+  return c.text('Hello Bitch ass!')
 })
 
-export default app
+app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw))
+
+export default {
+  port: 3000,
+  fetch: app.fetch,
+}

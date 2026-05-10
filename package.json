@@ -2,9 +2,8 @@
   "name": "pigweed-be",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy --minify",
-    "cf-typegen": "wrangler types --env-interface CloudflareBindings"
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts"
   },
   "dependencies": {
     "@better-auth/prisma-adapter": "^1.6.10",
@@ -14,7 +13,6 @@
     "hono": "^4.12.18"
   },
   "devDependencies": {
-    "prisma": "^7.8.0",
-    "wrangler": "^4.4.0"
+    "prisma": "^7.8.0"
   }
 }
