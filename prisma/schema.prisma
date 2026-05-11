@@ -29,6 +29,7 @@ model User {
   sessions      Session[]
   accounts      Account[]
   purchases     CoinPurchase[]
+  posts         Post[]
 
   @@unique([email])
   @@map("user")
@@ -121,4 +122,48 @@ model CoinPurchase {
 
   @@index([userId])
   @@map("coin_purchase")
+}
+
+// ─────────────────────────────────────────────────────────────
+// CONTENT — Posts are the canvas. Comments and Awards (later)
+// attach to a Post. Soft-deleted via deletedAt so dependent
+// rows keep their FK target intact when a post is "removed".
+// All queries must filter `deletedAt: null` to hide them.
+// ─────────────────────────────────────────────────────────────
+
+model Post {
+  id        String      @id @default(cuid())
+  authorId  String
+  author    User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  deletedAt DateTime?
+  media     PostMedia[]
+
+  @@index([authorId])
+  @@index([createdAt])
+  @@map("post")
+}
+
+// PostMedia is a 1-to-many child of Post. `kind` is a plain string
+// ("image", "video", "gif") not a Prisma enum — enums need a migration
+// to add values, strings + app-side validation evolve more freely.
+// Width/height are stored so clients can reserve layout space before
+// the asset loads (prevents jank). onDelete: Cascade so media rows
+// disappear when a post is hard-deleted.
+model PostMedia {
+  id        String   @id @default(cuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  url       String
+  kind      String
+  order     Int      @default(0)
+  width     Int?
+  height    Int?
+  createdAt DateTime @default(now())
+
+  @@index([postId])
+  @@map("post_media")
 }

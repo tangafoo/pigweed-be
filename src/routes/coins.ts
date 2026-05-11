@@ -1,9 +1,9 @@
 import { Hono } from "hono";
-import { auth } from "../utils/auth";
 import { prisma } from "../utils/db";
 import { stripe } from "../utils/stripe";
+import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
 
-export const coins = new Hono();
+export const coins = new Hono<AuthVars>();
 
 coins.get("/packs", async (c) => {
   const packs = await prisma.coinPack.findMany({
@@ -14,20 +14,18 @@ coins.get("/packs", async (c) => {
   return c.json({ packs });
 });
 
-coins.get("/balance", async (c) => {
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  if (!session) return c.json({ error: "unauthorized" }, 401);
+coins.get("/balance", requireSignIn, async (c) => {
+  const userId = c.get("userId");
 
   const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
+    where: { id: userId },
     select: { coinBalance: true },
   });
   return c.json({ balance: user?.coinBalance ?? 0 });
 });
 
-coins.post("/checkout", async (c) => {
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  if (!session) return c.json({ error: "unauthorized" }, 401);
+coins.post("/checkout", requireSignIn, async (c) => {
+  const userId = c.get("userId");
 
   const body = await c.req.json().catch(() => null);
   const coinPackId = body?.coinPackId;
@@ -40,7 +38,7 @@ coins.post("/checkout", async (c) => {
 
   const purchase = await prisma.coinPurchase.create({
     data: {
-      userId: session.user.id,
+      userId,
       coinPackId: pack.id,
       stripeSessionId: `pending_${crypto.randomUUID()}`,
       coinsGranted: pack.coins,
@@ -57,7 +55,7 @@ coins.post("/checkout", async (c) => {
     success_url: `${baseUrl}/coins/success?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${baseUrl}/coins/cancel`,
     client_reference_id: purchase.id,
-    metadata: { purchaseId: purchase.id, userId: session.user.id },
+    metadata: { purchaseId: purchase.id, userId },
   });
 
   await prisma.coinPurchase.update({
