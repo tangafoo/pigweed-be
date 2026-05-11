@@ -12,16 +12,23 @@ datasource db {
   provider = "postgresql"
 }
 
+// ─────────────────────────────────────────────────────────────
+// AUTH — managed by Better Auth. Do not rename fields without
+// also updating better-auth config; the library maps to these.
+// ─────────────────────────────────────────────────────────────
+
 model User {
-  id            String    @id
+  id            String         @id
   name          String
   email         String
-  emailVerified Boolean   @default(false)
+  emailVerified Boolean        @default(false)
   image         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  coinBalance   Int            @default(0)
   sessions      Session[]
   accounts      Account[]
+  purchases     CoinPurchase[]
 
   @@unique([email])
   @@map("user")
@@ -73,4 +80,45 @@ model Verification {
 
   @@index([identifier])
   @@map("verification")
+}
+
+// ─────────────────────────────────────────────────────────────
+// COINS — Stripe-backed currency. CoinPack is the catalog
+// (mirrors Stripe Products/Prices). CoinPurchase is the ledger
+// row for each money→coins transaction, with stripeEventId as
+// the idempotency key for webhook delivery.
+// ─────────────────────────────────────────────────────────────
+
+model CoinPack {
+  id            String         @id @default(cuid())
+  name          String
+  coins         Int
+  priceCents    Int
+  currency      String         @default("usd")
+  stripePriceId String         @unique
+  active        Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  purchases     CoinPurchase[]
+
+  @@map("coin_pack")
+}
+
+model CoinPurchase {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  coinPackId      String
+  coinPack        CoinPack  @relation(fields: [coinPackId], references: [id])
+  stripeSessionId String    @unique
+  stripeEventId   String?   @unique
+  coinsGranted    Int
+  amountCents     Int
+  currency        String    @default("usd")
+  status          String    @default("pending")
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
+
+  @@index([userId])
+  @@map("coin_purchase")
 }
