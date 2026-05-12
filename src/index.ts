@@ -4,6 +4,7 @@ import { auth } from './utils/auth'
 import { coins } from './routes/coins'
 import { stripeWebhook } from './routes/stripe-webhook'
 import { posts } from './routes/posts'
+import { comments } from './routes/comments'
 
 const app = new Hono()
 
@@ -18,6 +19,7 @@ app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw))
 app.route('/coins', coins)
 app.route('/stripe/webhook', stripeWebhook)
 app.route('/posts', posts)
+app.route('/', comments)
 
 export default {
   port: 3000,

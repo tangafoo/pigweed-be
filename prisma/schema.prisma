@@ -30,6 +30,7 @@ model User {
   accounts      Account[]
   purchases     CoinPurchase[]
   posts         Post[]
+  comments      Comment[]
 
   @@unique([email])
   @@map("user")
@@ -141,6 +142,7 @@ model Post {
   updatedAt DateTime    @updatedAt
   deletedAt DateTime?
   media     PostMedia[]
+  comments  Comment[]
 
   @@index([authorId])
   @@index([createdAt])
@@ -166,4 +168,32 @@ model PostMedia {
 
   @@index([postId])
   @@map("post_media")
+}
+
+// Comment is self-referential: parentCommentId points back to id,
+// forming a tree. We store `depth` so we can cheaply enforce a max
+// nesting cap (single SELECT on the parent — no recursive walk).
+// Soft-deleted: replies and future awards keep their FK intact.
+// The named relation "CommentReplies" is required by Prisma because
+// the model has two relations to the same model (parent + replies).
+model Comment {
+  id              String    @id @default(cuid())
+  postId          String
+  post            Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  authorId        String
+  author          User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parentCommentId String?
+  parentComment   Comment?  @relation("CommentReplies", fields: [parentCommentId], references: [id], onDelete: Cascade)
+  replies         Comment[] @relation("CommentReplies")
+  depth           Int       @default(0)
+  body            String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  @@index([postId])
+  @@index([authorId])
+  @@index([parentCommentId])
+  @@index([postId, createdAt])
+  @@map("comment")
 }
