@@ -48,6 +48,56 @@ async function viewerVotes(
   return new Map(votes.map((v) => [v.commentId, v.value]));
 }
 
+type AwardSummaryRow = {
+  awardTypeId: string;
+  assetKey: string;
+  name: string;
+  count: number;
+};
+
+// Build a commentId → AwardSummaryRow[] map. Anonymous aggregation — granters
+// live behind /comments/:id/awards/granters. Sorted by count desc.
+async function awardSummaries(commentIds: string[]): Promise<Map<string, AwardSummaryRow[]>> {
+  if (commentIds.length === 0) return new Map();
+
+  const rows = await prisma.commentAward.findMany({
+    where: { commentId: { in: commentIds } },
+    select: {
+      commentId: true,
+      awardTypeId: true,
+      awardType: { select: { assetKey: true, name: true } },
+    },
+  });
+
+  const byComment = new Map<string, Map<string, AwardSummaryRow>>();
+  for (const r of rows) {
+    let inner = byComment.get(r.commentId);
+    if (!inner) {
+      inner = new Map();
+      byComment.set(r.commentId, inner);
+    }
+    const existing = inner.get(r.awardTypeId);
+    if (existing) {
+      existing.count++;
+    } else {
+      inner.set(r.awardTypeId, {
+        awardTypeId: r.awardTypeId,
+        assetKey: r.awardType.assetKey,
+        name: r.awardType.name,
+        count: 1,
+      });
+    }
+  }
+
+  const out = new Map<string, AwardSummaryRow[]>();
+  for (const [commentId, inner] of byComment) {
+    const arr = Array.from(inner.values());
+    arr.sort((a, b) => b.count - a.count);
+    out.set(commentId, arr);
+  }
+  return out;
+}
+
 // POST /posts/:postId/comments — create top-level OR reply.
 // No depth cap; the FE decides what to render and where to surface
 // "Read more comments".
@@ -116,12 +166,17 @@ comments.get("/posts/:postId/comments", optionalSignIn, async (c) => {
     select: commentSelect,
   });
 
-  const voteByCommentId = await viewerVotes(c.get("viewerId"), rows.map((r) => r.id));
+  const commentIds = rows.map((r) => r.id);
+  const [voteByCommentId, awardsByCommentId] = await Promise.all([
+    viewerVotes(c.get("viewerId"), commentIds),
+    awardSummaries(commentIds),
+  ]);
 
   return c.json({
     comments: rows.map((r) => ({
       ...redactIfDeleted(r),
       myVote: voteByCommentId.get(r.id) ?? null,
+      awards: awardsByCommentId.get(r.id) ?? [],
     })),
   });
 });
@@ -175,16 +230,22 @@ comments.get("/comments/:id/replies", optionalSignIn, async (c) => {
     }
   }
 
-  const voteByCommentId = await viewerVotes(
-    c.get("viewerId"),
-    [parent.id, ...descendants.map((d) => d.id)],
-  );
+  const allIds = [parent.id, ...descendants.map((d) => d.id)];
+  const [voteByCommentId, awardsByCommentId] = await Promise.all([
+    viewerVotes(c.get("viewerId"), allIds),
+    awardSummaries(allIds),
+  ]);
 
   return c.json({
-    parent: { ...redactIfDeleted(parent), myVote: voteByCommentId.get(parent.id) ?? null },
+    parent: {
+      ...redactIfDeleted(parent),
+      myVote: voteByCommentId.get(parent.id) ?? null,
+      awards: awardsByCommentId.get(parent.id) ?? [],
+    },
     comments: descendants.map((d) => ({
       ...redactIfDeleted(d),
       myVote: voteByCommentId.get(d.id) ?? null,
+      awards: awardsByCommentId.get(d.id) ?? [],
     })),
   });
 });

@@ -6,6 +6,7 @@
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
     "seed": "bun scripts/seed-coin-packs.ts",
+    "seed:awards": "bun scripts/seed-award-types.ts",
     "db:push": "bunx prisma db push",
     "db:reset": "bunx prisma db push --force-reset",
     "db:studio": "bunx prisma studio",

@@ -80,6 +80,58 @@ async function viewerVotes(
   return new Map(votes.map((v) => [v.postId, v.value]));
 }
 
+type AwardSummaryRow = {
+  awardTypeId: string;
+  assetKey: string;
+  name: string;
+  count: number;
+};
+
+// Build a postId → AwardSummaryRow[] map. Each summary aggregates by award
+// type (anonymous — granters live behind /posts/:id/awards/granters). Sorted
+// by count desc so the frontend can slice top-N for the bushy/stacked preview.
+async function awardSummaries(postIds: string[]): Promise<Map<string, AwardSummaryRow[]>> {
+  if (postIds.length === 0) return new Map();
+
+  const rows = await prisma.postAward.findMany({
+    where: { postId: { in: postIds } },
+    select: {
+      postId: true,
+      awardTypeId: true,
+      awardType: { select: { assetKey: true, name: true } },
+    },
+  });
+
+  // Two-level group: postId → awardTypeId → counter row
+  const byPost = new Map<string, Map<string, AwardSummaryRow>>();
+  for (const r of rows) {
+    let inner = byPost.get(r.postId);
+    if (!inner) {
+      inner = new Map();
+      byPost.set(r.postId, inner);
+    }
+    const existing = inner.get(r.awardTypeId);
+    if (existing) {
+      existing.count++;
+    } else {
+      inner.set(r.awardTypeId, {
+        awardTypeId: r.awardTypeId,
+        assetKey: r.awardType.assetKey,
+        name: r.awardType.name,
+        count: 1,
+      });
+    }
+  }
+
+  const out = new Map<string, AwardSummaryRow[]>();
+  for (const [postId, inner] of byPost) {
+    const arr = Array.from(inner.values());
+    arr.sort((a, b) => b.count - a.count);
+    out.set(postId, arr);
+  }
+  return out;
+}
+
 // Shape returned on every post-fetching endpoint. Defined once so the
 // list/get/create/patch responses stay in lockstep.
 const postSelect = {
@@ -109,10 +161,18 @@ posts.get("/", optionalSignIn, async (c) => {
     select: postSelect,
   });
 
-  const voteByPostId = await viewerVotes(c.get("viewerId"), rows.map((r) => r.id));
+  const postIds = rows.map((r) => r.id);
+  const [voteByPostId, awardsByPostId] = await Promise.all([
+    viewerVotes(c.get("viewerId"), postIds),
+    awardSummaries(postIds),
+  ]);
 
   return c.json({
-    posts: rows.map((r) => ({ ...r, myVote: voteByPostId.get(r.id) ?? null })),
+    posts: rows.map((r) => ({
+      ...r,
+      myVote: voteByPostId.get(r.id) ?? null,
+      awards: awardsByPostId.get(r.id) ?? [],
+    })),
     page,
     limit,
   });
@@ -126,9 +186,18 @@ posts.get("/:id", optionalSignIn, async (c) => {
   });
   if (!post) return c.json({ error: "post not found" }, 404);
 
-  const voteByPostId = await viewerVotes(c.get("viewerId"), [post.id]);
+  const [voteByPostId, awardsByPostId] = await Promise.all([
+    viewerVotes(c.get("viewerId"), [post.id]),
+    awardSummaries([post.id]),
+  ]);
 
-  return c.json({ post: { ...post, myVote: voteByPostId.get(post.id) ?? null } });
+  return c.json({
+    post: {
+      ...post,
+      myVote: voteByPostId.get(post.id) ?? null,
+      awards: awardsByPostId.get(post.id) ?? [],
+    },
+  });
 });
 
 posts.post("/", requireSignIn, async (c) => {

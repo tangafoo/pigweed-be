@@ -25,14 +25,16 @@ model User {
   image         String?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
-  coinBalance   Int            @default(0)
-  sessions      Session[]
-  accounts      Account[]
-  purchases     CoinPurchase[]
-  posts         Post[]
-  comments      Comment[]
-  postVotes     PostVote[]
-  commentVotes  CommentVote[]
+  coinBalance        Int            @default(0)
+  sessions           Session[]
+  accounts           Account[]
+  purchases          CoinPurchase[]
+  posts              Post[]
+  comments           Comment[]
+  postVotes          PostVote[]
+  commentVotes       CommentVote[]
+  postAwardsGiven    PostAward[]
+  commentAwardsGiven CommentAward[]
 
   @@unique([email])
   @@map("user")
@@ -148,6 +150,7 @@ model Post {
   media         PostMedia[]
   comments      Comment[]
   votes         PostVote[]
+  awards        PostAward[]
 
   @@index([authorId])
   @@index([createdAt])
@@ -195,9 +198,10 @@ model Comment {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   deletedAt       DateTime?
-  upvoteCount     Int           @default(0)
-  downvoteCount   Int           @default(0)
+  upvoteCount     Int            @default(0)
+  downvoteCount   Int            @default(0)
   votes           CommentVote[]
+  awards          CommentAward[]
 
   @@index([postId])
   @@index([authorId])
@@ -253,4 +257,69 @@ model CommentVote {
   @@index([commentId])
   @@index([userId, value])
   @@map("comment_vote")
+}
+
+// ─────────────────────────────────────────────────────────────
+// AWARDS — pigweed's punk-communist economy: users spend coins
+// (purchased or earned-via-achievement) to grant awards to other
+// users' posts/comments. AwardType is the catalog (admin-seeded,
+// like CoinPack), Post/CommentAward are the grants themselves.
+//
+// Multi-grant by design: one user can grant the same award type
+// to the same post multiple times. Anonymous by default in the
+// API (response summaries aggregate by award type only), but
+// granterId IS stored — a separate granters endpoint surfaces
+// it, eventually gated behind a pay-to-unlock (phase 2).
+//
+// coinsSpent is a SNAPSHOT of the price at grant time, so if an
+// AwardType's priceCoins changes later, historical grants still
+// reflect what was actually paid.
+// ─────────────────────────────────────────────────────────────
+
+model AwardType {
+  id            String         @id @default(cuid())
+  assetKey      String         @unique
+  name          String
+  priceCoins    Int
+  active        Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  postAwards    PostAward[]
+  commentAwards CommentAward[]
+
+  @@map("award_type")
+}
+
+model PostAward {
+  id          String    @id @default(cuid())
+  granterId   String
+  granter     User      @relation(fields: [granterId], references: [id], onDelete: Cascade)
+  postId      String
+  post        Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  awardTypeId String
+  awardType   AwardType @relation(fields: [awardTypeId], references: [id])
+  coinsSpent  Int
+  createdAt   DateTime  @default(now())
+
+  @@index([postId])
+  @@index([granterId])
+  @@index([postId, awardTypeId])
+  @@map("post_award")
+}
+
+model CommentAward {
+  id          String    @id @default(cuid())
+  granterId   String
+  granter     User      @relation(fields: [granterId], references: [id], onDelete: Cascade)
+  commentId   String
+  comment     Comment   @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  awardTypeId String
+  awardType   AwardType @relation(fields: [awardTypeId], references: [id])
+  coinsSpent  Int
+  createdAt   DateTime  @default(now())
+
+  @@index([commentId])
+  @@index([granterId])
+  @@index([commentId, awardTypeId])
+  @@map("comment_award")
 }

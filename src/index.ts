@@ -7,6 +7,7 @@ import { posts } from './routes/posts'
 import { comments } from './routes/comments'
 import { votes } from './routes/votes'
 import { users } from './routes/users'
+import { awards } from './routes/awards'
 
 const app = new Hono()
 
@@ -24,6 +25,7 @@ app.route('/posts', posts)
 app.route('/', comments)
 app.route('/', votes)
 app.route('/users', users)
+app.route('/', awards)
 
 export default {
   port: 3000,
