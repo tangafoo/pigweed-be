@@ -6,6 +6,7 @@ import { stripeWebhook } from './routes/stripe-webhook'
 import { posts } from './routes/posts'
 import { comments } from './routes/comments'
 import { votes } from './routes/votes'
+import { users } from './routes/users'
 
 const app = new Hono()
 
@@ -22,6 +23,7 @@ app.route('/stripe/webhook', stripeWebhook)
 app.route('/posts', posts)
 app.route('/', comments)
 app.route('/', votes)
+app.route('/users', users)
 
 export default {
   port: 3000,
