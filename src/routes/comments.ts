@@ -1,9 +1,11 @@
 import { Hono } from "hono";
 import { prisma } from "../utils/db";
+import { VoteValue } from "../generated/prisma/client";
 import { makeId, ID_PREFIX } from "../utils/ids";
 import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
+import { optionalSignIn, type ViewerVars } from "../middleware/optional-sign-in";
 
-export const comments = new Hono<AuthVars>();
+export const comments = new Hono<AuthVars & ViewerVars>();
 
 const BODY_MAX = 5000;
 
@@ -19,6 +21,8 @@ const commentSelect = {
   createdAt: true,
   updatedAt: true,
   deletedAt: true,
+  upvoteCount: true,
+  downvoteCount: true,
   author: { select: { id: true, name: true, image: true } },
 } as const;
 
@@ -27,6 +31,21 @@ const commentSelect = {
 function redactIfDeleted<T extends { deletedAt: Date | null; body: string; author: unknown }>(row: T) {
   if (!row.deletedAt) return row;
   return { ...row, body: "[deleted]", author: null };
+}
+
+// Build a commentId → vote-value map for the current viewer over the given
+// set of comments. Returns an empty map when the viewer is anonymous or the
+// id list is empty (no DB call in those cases).
+async function viewerVotes(
+  viewerId: string | undefined,
+  commentIds: string[],
+): Promise<Map<string, VoteValue>> {
+  if (!viewerId || commentIds.length === 0) return new Map();
+  const votes = await prisma.commentVote.findMany({
+    where: { userId: viewerId, commentId: { in: commentIds } },
+    select: { commentId: true, value: true },
+  });
+  return new Map(votes.map((v) => [v.commentId, v.value]));
 }
 
 // POST /posts/:postId/comments — create top-level OR reply.
@@ -82,7 +101,7 @@ comments.post("/posts/:postId/comments", requireSignIn, async (c) => {
 // thousands of comments, add pagination keyed on top-level threads (each
 // page bundles a top-level comment plus its full subtree, so the tree never
 // gets cut mid-branch).
-comments.get("/posts/:postId/comments", async (c) => {
+comments.get("/posts/:postId/comments", optionalSignIn, async (c) => {
   const postId = c.req.param("postId");
 
   const post = await prisma.post.findFirst({
@@ -97,7 +116,14 @@ comments.get("/posts/:postId/comments", async (c) => {
     select: commentSelect,
   });
 
-  return c.json({ comments: rows.map(redactIfDeleted) });
+  const voteByCommentId = await viewerVotes(c.get("viewerId"), rows.map((r) => r.id));
+
+  return c.json({
+    comments: rows.map((r) => ({
+      ...redactIfDeleted(r),
+      myVote: voteByCommentId.get(r.id) ?? null,
+    })),
+  });
 });
 
 // GET /comments/:id/replies — parent stub + ALL descendants (recursive).
@@ -112,7 +138,7 @@ comments.get("/posts/:postId/comments", async (c) => {
 // Slightly wasteful (loads sibling subtrees we won't return) but trivial
 // at pigweed scale and avoids raw SQL. If posts ever carry 10k+ comments,
 // switch to a `path` column (materialized path) — one indexed LIKE query.
-comments.get("/comments/:id/replies", async (c) => {
+comments.get("/comments/:id/replies", optionalSignIn, async (c) => {
   const id = c.req.param("id");
 
   // Parent is NOT filtered by deletedAt — replies under a deleted parent
@@ -149,9 +175,17 @@ comments.get("/comments/:id/replies", async (c) => {
     }
   }
 
+  const voteByCommentId = await viewerVotes(
+    c.get("viewerId"),
+    [parent.id, ...descendants.map((d) => d.id)],
+  );
+
   return c.json({
-    parent: redactIfDeleted(parent),
-    comments: descendants.map(redactIfDeleted),
+    parent: { ...redactIfDeleted(parent), myVote: voteByCommentId.get(parent.id) ?? null },
+    comments: descendants.map((d) => ({
+      ...redactIfDeleted(d),
+      myVote: voteByCommentId.get(d.id) ?? null,
+    })),
   });
 });
 

@@ -8,6 +8,9 @@
     "lib": [
       "ESNext"
     ],
+    "types": [
+      "bun"
+    ],
     "jsx": "react-jsx",
     "jsxImportSource": "hono/jsx"
   },

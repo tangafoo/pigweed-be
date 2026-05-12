@@ -31,6 +31,8 @@ model User {
   purchases     CoinPurchase[]
   posts         Post[]
   comments      Comment[]
+  postVotes     PostVote[]
+  commentVotes  CommentVote[]
 
   @@unique([email])
   @@map("user")
@@ -133,16 +135,19 @@ model CoinPurchase {
 // ─────────────────────────────────────────────────────────────
 
 model Post {
-  id        String      @id @default(cuid())
-  authorId  String
-  author    User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  title     String
-  body      String
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
-  deletedAt DateTime?
-  media     PostMedia[]
-  comments  Comment[]
+  id            String      @id @default(cuid())
+  authorId      String
+  author        User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  title         String
+  body          String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  deletedAt     DateTime?
+  upvoteCount   Int         @default(0)
+  downvoteCount Int         @default(0)
+  media         PostMedia[]
+  comments      Comment[]
+  votes         PostVote[]
 
   @@index([authorId])
   @@index([createdAt])
@@ -177,23 +182,75 @@ model PostMedia {
 // The named relation "CommentReplies" is required by Prisma because
 // the model has two relations to the same model (parent + replies).
 model Comment {
-  id              String    @id @default(cuid())
+  id              String        @id @default(cuid())
   postId          String
-  post            Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  post            Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
   authorId        String
-  author          User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  author          User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
   parentCommentId String?
-  parentComment   Comment?  @relation("CommentReplies", fields: [parentCommentId], references: [id], onDelete: Cascade)
-  replies         Comment[] @relation("CommentReplies")
-  depth           Int       @default(0)
+  parentComment   Comment?      @relation("CommentReplies", fields: [parentCommentId], references: [id], onDelete: Cascade)
+  replies         Comment[]     @relation("CommentReplies")
+  depth           Int           @default(0)
   body            String
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
   deletedAt       DateTime?
+  upvoteCount     Int           @default(0)
+  downvoteCount   Int           @default(0)
+  votes           CommentVote[]
 
   @@index([postId])
   @@index([authorId])
   @@index([parentCommentId])
   @@index([postId, createdAt])
   @@map("comment")
+}
+
+// ─────────────────────────────────────────────────────────────
+// VOTES — one row per (user, target). value is a closed enum
+// (UP, DOWN) enforced at the DB level. Composite PK enforces
+// one-vote-per-user without an extra `id` column. Aggregate
+// counts on Post/Comment are kept in sync via $transaction at
+// every vote write.
+//
+// Enum chosen here (despite the project's general "ints/strings
+// + app validation" preference) because the value space is
+// genuinely closed forever — there is no third vote direction.
+// ─────────────────────────────────────────────────────────────
+
+enum VoteValue {
+  UP
+  DOWN
+
+  @@map("vote_value")
+}
+
+model PostVote {
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postId    String
+  post      Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  value     VoteValue
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@id([userId, postId])
+  @@index([postId])
+  @@index([userId, value])
+  @@map("post_vote")
+}
+
+model CommentVote {
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  commentId String
+  comment   Comment   @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  value     VoteValue
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@id([userId, commentId])
+  @@index([commentId])
+  @@index([userId, value])
+  @@map("comment_vote")
 }

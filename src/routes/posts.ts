@@ -1,9 +1,11 @@
 import { Hono } from "hono";
 import { prisma } from "../utils/db";
+import { VoteValue } from "../generated/prisma/client";
 import { makeId, ID_PREFIX } from "../utils/ids";
 import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
+import { optionalSignIn, type ViewerVars } from "../middleware/optional-sign-in";
 
-export const posts = new Hono<AuthVars>();
+export const posts = new Hono<AuthVars & ViewerVars>();
 
 const VALID_MEDIA_KINDS = ["image", "video", "gif"] as const;
 const MAX_MEDIA_PER_POST = 10;
@@ -63,6 +65,21 @@ export function parseMedia(input: unknown): MediaInput[] | { error: string } {
   return out;
 }
 
+// Build a postId → vote-value map for the current viewer over the given
+// set of posts. Returns an empty map when the viewer is anonymous or the
+// id list is empty (no DB call in those cases).
+async function viewerVotes(
+  viewerId: string | undefined,
+  postIds: string[],
+): Promise<Map<string, VoteValue>> {
+  if (!viewerId || postIds.length === 0) return new Map();
+  const votes = await prisma.postVote.findMany({
+    where: { userId: viewerId, postId: { in: postIds } },
+    select: { postId: true, value: true },
+  });
+  return new Map(votes.map((v) => [v.postId, v.value]));
+}
+
 // Shape returned on every post-fetching endpoint. Defined once so the
 // list/get/create/patch responses stay in lockstep.
 const postSelect = {
@@ -71,6 +88,8 @@ const postSelect = {
   body: true,
   createdAt: true,
   updatedAt: true,
+  upvoteCount: true,
+  downvoteCount: true,
   author: { select: { id: true, name: true, image: true } },
   media: {
     select: { id: true, url: true, kind: true, order: true, width: true, height: true },
@@ -78,7 +97,7 @@ const postSelect = {
   },
 } as const;
 
-posts.get("/", async (c) => {
+posts.get("/", optionalSignIn, async (c) => {
   const page = Math.max(1, Number(c.req.query("page") ?? 1));
   const limit = Math.min(100, Math.max(1, Number(c.req.query("limit") ?? 20)));
 
@@ -90,17 +109,26 @@ posts.get("/", async (c) => {
     select: postSelect,
   });
 
-  return c.json({ posts: rows, page, limit });
+  const voteByPostId = await viewerVotes(c.get("viewerId"), rows.map((r) => r.id));
+
+  return c.json({
+    posts: rows.map((r) => ({ ...r, myVote: voteByPostId.get(r.id) ?? null })),
+    page,
+    limit,
+  });
 });
 
-posts.get("/:id", async (c) => {
+posts.get("/:id", optionalSignIn, async (c) => {
   const id = c.req.param("id");
   const post = await prisma.post.findFirst({
     where: { id, deletedAt: null },
     select: postSelect,
   });
   if (!post) return c.json({ error: "post not found" }, 404);
-  return c.json({ post });
+
+  const voteByPostId = await viewerVotes(c.get("viewerId"), [post.id]);
+
+  return c.json({ post: { ...post, myVote: voteByPostId.get(post.id) ?? null } });
 });
 
 posts.post("/", requireSignIn, async (c) => {
