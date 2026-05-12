@@ -10,7 +10,8 @@
     "db:reset": "bunx prisma db push --force-reset",
     "db:studio": "bunx prisma studio",
     "stripe:listen": "stripe listen --forward-to localhost:3000/stripe/webhook",
-    "typecheck": "bunx tsc --noEmit"
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bun test"
   },
   "dependencies": {
     "@better-auth/prisma-adapter": "^1.6.10",

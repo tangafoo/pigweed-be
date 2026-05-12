@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { prisma } from "../utils/db";
+import { makeId, ID_PREFIX } from "../utils/ids";
 import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
 
 export const posts = new Hono<AuthVars>();
@@ -28,7 +29,7 @@ function isValidUrl(s: string): boolean {
 
 // Returns parsed media OR a string error message. Discriminated union
 // would be tidier but this is small enough that "string = error" works.
-function parseMedia(input: unknown): MediaInput[] | { error: string } {
+export function parseMedia(input: unknown): MediaInput[] | { error: string } {
   if (input == null) return [];
   if (!Array.isArray(input)) return { error: "media must be an array" };
   if (input.length > MAX_MEDIA_PER_POST) {
@@ -121,12 +122,14 @@ posts.post("/", requireSignIn, async (c) => {
 
   const post = await prisma.post.create({
     data: {
+      id: makeId(ID_PREFIX.POST),
       authorId: userId,
       title,
       body: content,
       media: mediaResult.length > 0
         ? {
           create: mediaResult.map((m) => ({
+            id: makeId(ID_PREFIX.POST_MEDIA),
             url: m.url, kind: m.kind, order: m.order, width: m.width, height: m.height,
           }))
         }

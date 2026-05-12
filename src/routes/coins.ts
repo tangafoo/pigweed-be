@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { prisma } from "../utils/db";
+import { makeId, ID_PREFIX } from "../utils/ids";
 import { stripe } from "../utils/stripe";
 import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
 
@@ -38,6 +39,7 @@ coins.post("/checkout", requireSignIn, async (c) => {
 
   const purchase = await prisma.coinPurchase.create({
     data: {
+      id: makeId(ID_PREFIX.COIN_PURCHASE),
       userId,
       coinPackId: pack.id,
       stripeSessionId: `pending_${crypto.randomUUID()}`,

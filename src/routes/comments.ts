@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { prisma } from "../utils/db";
+import { makeId, ID_PREFIX } from "../utils/ids";
 import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
 
 export const comments = new Hono<AuthVars>();
@@ -66,7 +67,7 @@ comments.post("/posts/:postId/comments", requireSignIn, async (c) => {
   }
 
   const comment = await prisma.comment.create({
-    data: { postId, authorId: userId, parentCommentId, depth, body: text },
+    data: { id: makeId(ID_PREFIX.COMMENT), postId, authorId: userId, parentCommentId, depth, body: text },
     select: commentSelect,
   });
 

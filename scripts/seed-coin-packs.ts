@@ -1,4 +1,5 @@
 import { prisma } from "../src/utils/db";
+import { makeId, ID_PREFIX } from "../src/utils/ids";
 import { stripe } from "../src/utils/stripe";
 
 type PackSeed = {
@@ -39,6 +40,7 @@ async function main() {
     await prisma.coinPack.upsert({
       where: { stripePriceId: price.id },
       create: {
+        id: makeId(ID_PREFIX.COIN_PACK),
         name: seed.name,
         coins: seed.coins,
         priceCents: seed.priceCents,
