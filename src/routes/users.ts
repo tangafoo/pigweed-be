@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { prisma } from "../utils/db";
 import { bus } from "../events/bus";
+import { rollIdentity } from "../utils/identity";
 import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
 
 export const users = new Hono<AuthVars>();
@@ -109,6 +110,28 @@ users.get("/:userId/achievements", async (c) => {
     if (!user) return c.json({ error: "user not found" }, 404);
 
     return c.json({ achievements: rows });
+});
+
+// ─────────────────────────────────────────────────────────────
+// POST /users/me/avatar/reroll
+// Atomically picks a new (animal, avatarSeed) for the current user.
+// Each click of the FE's "generate" button hits this — there's no
+// staging state, no separate "keep this one" commit. The roll IS
+// the commit. Future griefing-resistance ideas: 30-day cooldown,
+// limited free rerolls per month — defer until needed.
+// ─────────────────────────────────────────────────────────────
+
+users.post("/me/avatar/reroll", requireSignIn, async (c) => {
+    const userId = c.get("userId");
+    const next = rollIdentity();
+
+    const updated = await prisma.user.update({
+        where: { id: userId },
+        data: { animal: next.animal, avatarSeed: next.avatarSeed },
+        select: { animal: true, avatarSeed: true },
+    });
+
+    return c.json(updated);
 });
 
 // ─────────────────────────────────────────────────────────────

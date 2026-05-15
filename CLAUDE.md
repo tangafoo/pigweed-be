@@ -1,0 +1,101 @@
+# pigweed
+
+A backend for an anonymous, hyperlocal, animal-themed social network.
+
+## What pigweed is
+
+Imagine a farm. Every user is an animal — chicken, goose, quail, pig, etc. — assigned randomly when they sign up. You don't choose your animal; you roll for it (re-roll until you like the result, then commit). Your avatar is procedurally drawn from a small library of hand-drawn SVG silhouettes plus deterministic color variations seeded by your user id. You pick a username; you specify a gender.
+
+The farm is **location-bounded**: you only see posts and comments from animals within a radius (~100km) of where you currently are. Travel and the feed travels with you. Each post is locked to the location where it was created, so leaving town doesn't blank the conversation behind you — your old posts stay home.
+
+The vibe is 4chan-flavored anonymity with adult supervision: persistent pseudonym (your animal stays across sessions), bounded community (geo-scoped, not globally exposed), AI moderation gating posts before they land, soft-fading content via community vote thresholds. You can be salty as a goose; you can't be hateful.
+
+The visual identity is heavy SVG, GSAP-animated, math-driven. Visual state derives from data state — vote counts make a post card's border grow "bushier," not via stored metadata. Backend stays calm and numeric; the frontend goes feral.
+
+## Principles
+
+1. **Persistent pseudonym beats pure anonymity.** Your animal stays across sessions. The community gets memory; you keep distance from your real identity.
+2. **Bounded community beats global exposure.** Geo radius is the bound. Smaller community = lighter moderation burden, denser local signal.
+3. **Moderate hate, not spice.** A grumpy goose calling another goose a fucker is authentic punk-farm energy. Slurs and incitement are not. Use moderation categories (`hate`, `harassment`, `violence`, `self-harm`), not curse-word lists.
+4. **Anonymous within the community, never toward an individual.** No anonymous DMs. No "send a message to this specific person" surface, ever. Sarahah and NGL died of this; learn the lesson.
+5. **Be honest about what's anonymous.** Posts: public and anonymous. IPs: logged for moderation. Account age: surfaced. Tell users this; never trade on a privacy promise you can't keep.
+6. **Data state shapes UI state, not the reverse.** Vote counts drive bushiness; downvote thresholds drive collapse; geo distance drives feed inclusion. The backend never embeds visual concepts; the frontend interprets the numbers.
+7. **Stay solo-dev simple until pain forces growth.** Formulas over ML for ranking until the math hurts. In-process EventEmitter over Redis pub/sub until multi-server hurts. Hand-drawn SVG over AI generation until uniqueness becomes a real bottleneck.
+
+## Identity model
+
+- **Animal**: random assignment at signup (CHICKEN, GOOSE, QUAIL, PIG, DUCK, COW, …). Reroll-as-you-go — every click of "generate" is itself a commit (no save button). The user can re-roll at any time from the settings page; no cooldown for MVP, add one later if we see griefing.
+- **Username**: user-chosen, unique. Better Auth currently uses `name` (non-unique); a unique `username` field will need to be added.
+- **Gender**: user-chosen at signup. Used to vary avatar drawing and any localized copy.
+- **Avatar**: procedurally drawn SVG tile with punk-DNA variation. The image is a *function*, not an asset — `(animal, avatarSeed) → SVG`. The frontend renders from those two fields; no image storage, no CDN, no AI generation. Each avatar tile is a **colored circle (background)** with the **layered animal silhouette** inside it. Both the circle bg and the animal's regions (body, wing, head, accent, accessory) are separate paths with their own `var(--...)` fills. Seed math distributes colors from a curated punk palette across all slots — backgrounds drawn from a saturated/mid-dark sub-palette, bodies from a brighter/contrasting sub-palette so the silhouette never camouflages — plus picks 1-of-N patterns (spots, stripes, scratches) and 0-or-1 accessory (hat, cig, mohawk, etc.). One weekend of hand-drawn iPad work + ~30 lines of seed→CSS-variable code yields effectively infinite distinct avatars per animal type.
+- **`avatarSeed`**: random integer column on User, regenerated every time the reroll endpoint is hit. Two users with the same animal but different seeds look visually distinct.
+- **Reroll endpoint**: `POST /me/avatar/reroll` — atomically updates `user.animal` and `user.avatarSeed` and returns the new pair. Each click is the commit.
+- **Account age**: surfaced as "hatched X days ago" so new accounts are visibly fresh.
+
+## Geo model
+
+- `Post.latitude` / `Post.longitude`: frozen at creation time. The post belongs to a place.
+- `User.latitude` / `User.longitude`: mutable. Refreshes from the client or coarse IP-geo on session refresh.
+- Feed query filters posts where `distance(post.geo, currentUser.geo) < RADIUS_KM`.
+- **PostGIS** is the implementation (Supabase has it; enable via dashboard or `CREATE EXTENSION IF NOT EXISTS postgis;`). Geo columns are `GEOGRAPHY(POINT, 4326)`; queries use `ST_DWithin` with a GIST index for sub-millisecond radius checks.
+- Travelling animals see local content where they currently are. Their old posts stay where they were made.
+- "Visiting from elsewhere" can be a UI badge later (post.geo far from author's current geo).
+
+## Ranking (algorithm)
+
+A formula, not a model. Until pigweed has 10k+ DAU, ML is overkill. Score signal:
+
+```
+score(post, viewer) =
+    -k_geo  × distance_km(post, viewer)              // closer is higher
+  + k_score × (post.upvoteCount - post.downvoteCount) // votes
+  / time_decay(post.createdAt)                        // fresher is higher
+  + animal_affinity(post.author.animal, viewer.animal) // chickens see chickens, optional
+  + jitter()                                          // small random so top doesn't stick
+```
+
+Lives in `src/utils/ranking.ts` (when built). Weights start hard-coded; tune as signal arrives. ML replaces it when the formula stops carrying.
+
+## Moderation
+
+- **Pre-flight**: every post/comment runs through OpenAI Moderation API (free) before insert. Hard-block on categories: `hate`, `hate/threatening`, `harassment`, `harassment/threatening`, `violence/graphic`, `self-harm`, `self-harm/intent`. Allow `sexual/non-explicit` and casual profanity unless the user is reading content as a flagged minor (deferred).
+- **Soft-fade via votes**: comments where `upvoteCount - downvoteCount < -5` get `hidden: true` in the response (already shipped). Frontend collapses with click-to-reveal.
+- **Reporting (deferred)**: human-review queue keyed by community report counts.
+- **No DMs**: harassment vector. Off the roadmap entirely.
+- **Vote weight by tenure (deferred)**: new accounts' votes count less. Resists brigading. Defer until brigading actually happens.
+
+## Tech stack
+
+Bun runtime, Hono framework, Better Auth, Prisma 7, Supabase Postgres (with PostGIS), Stripe.
+
+See `memory/project_stack_and_gotchas.md` for the non-obvious traps we've already hit.
+
+## Shipped backend layers
+
+- Auth (Better Auth)
+- Posts, comments, media (soft-delete + redaction)
+- Coins (Stripe checkout, webhook crediting)
+- Votes (UP/DOWN enum, cached counts, public profile votes)
+- Awards (catalog, multi-grant, granters endpoint gated by pay-to-unlock with `unlockCoins`)
+- `unlockCoins` Postgres trigger: every 10 awards granted → +5 unlockCoins
+- Achievements (DB-driven catalog, event-bus engine, SSE live notifications)
+- Visibility threshold (comments with net score < -5 flagged `hidden`)
+- Migrations adopted (versioned `prisma/migrations/`, `bun db:migrate-deploy` auto-handles triggers)
+
+## Not yet built (in rough priority order)
+
+- Animal/username/gender on User schema
+- Procedural SVG avatar generation
+- Random-roll signup flow (reroll until commit)
+- PostGIS geo columns on Post and User
+- Geo-filtered feed query
+- Ranking formula (`src/utils/ranking.ts`)
+- AI moderation pipeline (`src/utils/ai/moderator.ts` — OpenAI Moderation API)
+- Frontend (heavy SVG/GSAP, math-driven animations)
+
+## Pre-launch hygiene (deferred but real)
+
+- Set `NODE_ENV=production` on the deploy host (Railway is the plan). `src/utils/env.ts:isProd()` keys off it.
+- Stripe live keys + webhook secret separate from dev.
+- Privacy notice / TOS that's honest about what's logged (IP, timestamps, content) vs. what's anonymous (no real-name identity link).
+- Age gate (Apple/Google both rate "anonymous social" as 17+; pre-emptive).

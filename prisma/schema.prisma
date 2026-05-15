@@ -13,6 +13,31 @@ datasource db {
 }
 
 // ─────────────────────────────────────────────────────────────
+// IDENTITY — pigweed users are animals on a farm. Animal is
+// assigned randomly at signup and rerollable via /me/avatar/reroll.
+// avatarSeed feeds deterministic color/pattern math on the FE
+// so two CHICKENs with different seeds look visually distinct.
+// Username and gender are user-chosen at signup.
+// ─────────────────────────────────────────────────────────────
+
+enum Animal {
+  CHICKEN
+  DOG
+  GOOSE
+
+  @@map("animal")
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  NONBINARY
+  UNDISCLOSED
+
+  @@map("gender")
+}
+
+// ─────────────────────────────────────────────────────────────
 // AUTH — managed by Better Auth. Do not rename fields without
 // also updating better-auth config; the library maps to these.
 // ─────────────────────────────────────────────────────────────
@@ -25,6 +50,11 @@ model User {
   image         String?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
+  // Identity — animals on the pigweed farm. See CLAUDE.md.
+  username      String         @unique
+  gender        Gender
+  animal        Animal
+  avatarSeed    Int            // feeds deterministic FE color/pattern math
   coinBalance        Int                     @default(0)
   // Separate "currency" from coinBalance: earned (not bought) by granting
   // awards — every 10 grants → +5 unlockCoins via a Postgres trigger.
