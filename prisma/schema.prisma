@@ -55,6 +55,10 @@ model User {
   gender        Gender
   animal        Animal
   avatarSeed    Int            // feeds deterministic FE color/pattern math
+  // Note: pigweed does NOT store user current geo. The FE knows where
+  // the user is (browser geolocation API) and sends lat/lng on each
+  // request that needs it (post creation, feed query). Privacy-cleaner;
+  // also lets a user explicitly "browse" another location's feed.
   coinBalance        Int                     @default(0)
   // Separate "currency" from coinBalance: earned (not bought) by granting
   // awards — every 10 grants → +5 unlockCoins via a Postgres trigger.
@@ -180,6 +184,11 @@ model Post {
   author        User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
   title         String
   body          String
+  // Frozen at creation — the post belongs to a place. Not nullable
+  // because pigweed's whole model is location-bounded; a post without
+  // geo can't be filtered into anyone's feed.
+  latitude      Float
+  longitude     Float
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
   deletedAt     DateTime?
@@ -193,6 +202,10 @@ model Post {
 
   @@index([authorId])
   @@index([createdAt])
+  // Note: spatial radius queries hit the GIST index on the generated
+  // `geo` column (created by the migration's manual SQL). No need for a
+  // composite (latitude, longitude) B-tree — the GIST handles all
+  // distance work natively and faster.
   @@map("post")
 }
 

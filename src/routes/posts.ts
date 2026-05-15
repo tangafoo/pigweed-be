@@ -3,6 +3,7 @@ import { prisma } from "../utils/db";
 import { VoteValue } from "../generated/prisma/client";
 import { makeId, ID_PREFIX } from "../utils/ids";
 import { bus } from "../events/bus";
+import { isValidLatLng, DEFAULT_RADIUS_KM } from "../utils/geo";
 import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
 import { optionalSignIn, type ViewerVars } from "../middleware/optional-sign-in";
 
@@ -139,6 +140,8 @@ const postSelect = {
   id: true,
   title: true,
   body: true,
+  latitude: true,
+  longitude: true,
   createdAt: true,
   updatedAt: true,
   upvoteCount: true,
@@ -154,13 +157,58 @@ posts.get("/", optionalSignIn, async (c) => {
   const page = Math.max(1, Number(c.req.query("page") ?? 1));
   const limit = Math.min(100, Math.max(1, Number(c.req.query("limit") ?? 20)));
 
-  const rows = await prisma.post.findMany({
-    where: { deletedAt: null },
-    orderBy: { createdAt: "desc" },
-    skip: (page - 1) * limit,
-    take: limit,
-    select: postSelect,
-  });
+  // Optional geo filter — FE passes ?lat=&lng= (and optionally ?radius=).
+  // If absent, the feed returns everything (back-compat, "browse all" UX).
+  const latStr = c.req.query("lat");
+  const lngStr = c.req.query("lng");
+  const radiusStr = c.req.query("radius");
+  const viewer = isValidLatLng({ latitude: Number(latStr), longitude: Number(lngStr) })
+    ? { latitude: Number(latStr), longitude: Number(lngStr) }
+    : null;
+  const radiusKm = Number.isFinite(Number(radiusStr)) && Number(radiusStr) > 0
+    ? Number(radiusStr)
+    : DEFAULT_RADIUS_KM;
+
+  // PostGIS does the radius math. The `geo` column on post is a generated
+  // geography(Point, 4326) maintained by Postgres from latitude/longitude;
+  // a GIST index makes ST_DWithin sub-millisecond regardless of post count.
+  // ST_DWithin takes distance in METERS (hence radiusKm * 1000).
+  //
+  // We $queryRaw for the matching IDs (with ordering + pagination at the
+  // DB), then a regular Prisma findMany resolves the full payload through
+  // postSelect so we don't have to hand-roll the relation joins.
+  let rows: Array<typeof postSelect extends infer _ ? any : never>;
+  if (viewer) {
+    const offset = (page - 1) * limit;
+    const idRows = await prisma.$queryRaw<{ id: string }[]>`
+      SELECT id FROM "post"
+      WHERE "deletedAt" IS NULL
+        AND ST_DWithin(
+          geo,
+          ST_SetSRID(ST_MakePoint(${viewer.longitude}, ${viewer.latitude}), 4326)::geography,
+          ${radiusKm * 1000}
+        )
+      ORDER BY "createdAt" DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+    const ids = idRows.map((r) => r.id);
+    const fetched = await prisma.post.findMany({
+      where: { id: { in: ids } },
+      select: postSelect,
+    });
+    // findMany doesn't preserve the IN-clause order; re-sort to match
+    // the DB-side ORDER BY createdAt DESC the raw query gave us.
+    const byId = new Map(fetched.map((p) => [p.id, p]));
+    rows = ids.map((id) => byId.get(id)).filter((p): p is NonNullable<typeof p> => p != null);
+  } else {
+    rows = await prisma.post.findMany({
+      where: { deletedAt: null },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * limit,
+      take: limit,
+      select: postSelect,
+    });
+  }
 
   const postIds = rows.map((r) => r.id);
   const [voteByPostId, awardsByPostId] = await Promise.all([
@@ -176,6 +224,7 @@ posts.get("/", optionalSignIn, async (c) => {
     })),
     page,
     limit,
+    radiusKm: viewer ? radiusKm : null,
   });
 });
 
@@ -215,6 +264,15 @@ posts.post("/", requireSignIn, async (c) => {
     return c.json({ error: `body must be 1-${BODY_MAX} chars` }, 400);
   }
 
+  // Geo is REQUIRED. Pigweed posts are location-anchored — there's no
+  // such thing as a placeless post. The FE provides the user's current
+  // coords from the browser geolocation API.
+  if (!isValidLatLng(body ?? {})) {
+    return c.json({ error: "latitude and longitude required in body" }, 400);
+  }
+  const latitude = body.latitude;
+  const longitude = body.longitude;
+
   const mediaResult = parseMedia(body?.media);
   if (!Array.isArray(mediaResult)) return c.json(mediaResult, 400);
 
@@ -224,6 +282,8 @@ posts.post("/", requireSignIn, async (c) => {
       authorId: userId,
       title,
       body: content,
+      latitude,
+      longitude,
       media: mediaResult.length > 0
         ? {
           create: mediaResult.map((m) => ({
