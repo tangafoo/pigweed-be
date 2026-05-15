@@ -1,5 +1,5 @@
 import { prisma } from "../src/utils/db";
-import { isProdDatabase } from "../src/utils/env";
+import { isProd } from "../src/utils/env";
 
 // Interactive admin script — HARD-deletes a user. Cascades fire and take
 // down all their content, plus any other-user content that hangs off it
@@ -33,7 +33,7 @@ async function main() {
     console.log('Invalid — must be "dev" or "prod". Aborted.');
     process.exit(1);
   }
-  const actuallyProd = isProdDatabase();
+  const actuallyProd = isProd();
   if (claimed === "dev" && actuallyProd) {
     console.error('Mismatch: you said "dev" but DATABASE_URL/DIRECT_URL points at prod. Aborted.');
     process.exit(1);
