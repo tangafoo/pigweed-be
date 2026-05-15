@@ -1,3 +1,13 @@
+-- Enable PostGIS — required before the post table's geo column (geography
+-- type) is created. Hand-added (Prisma doesn't manage extensions). Idempotent.
+CREATE EXTENSION IF NOT EXISTS postgis;
+
+-- CreateEnum
+CREATE TYPE "animal" AS ENUM ('CHICKEN', 'DOG', 'GOOSE');
+
+-- CreateEnum
+CREATE TYPE "gender" AS ENUM ('MALE', 'FEMALE', 'NONBINARY', 'UNDISCLOSED');
+
 -- CreateEnum
 CREATE TYPE "vote_value" AS ENUM ('UP', 'DOWN');
 
@@ -13,6 +23,10 @@ CREATE TABLE "user" (
     "image" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "username" TEXT NOT NULL,
+    "gender" "gender" NOT NULL,
+    "animal" "animal" NOT NULL,
+    "avatarSeed" INTEGER NOT NULL,
     "coinBalance" INTEGER NOT NULL DEFAULT 0,
     "unlockCoins" INTEGER NOT NULL DEFAULT 0,
 
@@ -102,11 +116,18 @@ CREATE TABLE "post" (
     "authorId" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "body" TEXT NOT NULL,
+    "latitude" DOUBLE PRECISION NOT NULL,
+    "longitude" DOUBLE PRECISION NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "deletedAt" TIMESTAMP(3),
     "upvoteCount" INTEGER NOT NULL DEFAULT 0,
     "downvoteCount" INTEGER NOT NULL DEFAULT 0,
+    "moderated" BOOLEAN NOT NULL DEFAULT true,
+    -- Hand-edited: Prisma scaffolds this as a plain column. We make it a
+    -- Postgres GENERATED column so geo is always derived from lat/lng,
+    -- auto-maintained on every insert/update with zero app code.
+    "geo" geography(Point, 4326) GENERATED ALWAYS AS (ST_SetSRID(ST_MakePoint("longitude", "latitude"), 4326)::geography) STORED,
 
     CONSTRAINT "post_pkey" PRIMARY KEY ("id")
 );
@@ -138,6 +159,7 @@ CREATE TABLE "comment" (
     "deletedAt" TIMESTAMP(3),
     "upvoteCount" INTEGER NOT NULL DEFAULT 0,
     "downvoteCount" INTEGER NOT NULL DEFAULT 0,
+    "moderated" BOOLEAN NOT NULL DEFAULT true,
 
     CONSTRAINT "comment_pkey" PRIMARY KEY ("id")
 );
@@ -246,6 +268,9 @@ CREATE TABLE "user_achievement" (
 );
 
 -- CreateIndex
+CREATE UNIQUE INDEX "user_username_key" ON "user"("username");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "user_email_key" ON "user"("email");
 
 -- CreateIndex
@@ -277,6 +302,9 @@ CREATE INDEX "post_authorId_idx" ON "post"("authorId");
 
 -- CreateIndex
 CREATE INDEX "post_createdAt_idx" ON "post"("createdAt");
+
+-- CreateIndex
+CREATE INDEX "post_geo_idx" ON "post" USING GIST ("geo");
 
 -- CreateIndex
 CREATE INDEX "post_media_postId_idx" ON "post_media"("postId");

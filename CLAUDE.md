@@ -72,30 +72,35 @@ See `memory/project_stack_and_gotchas.md` for the non-obvious traps we've alread
 
 ## Shipped backend layers
 
-- Auth (Better Auth)
-- Posts, comments, media (soft-delete + redaction)
-- Coins (Stripe checkout, webhook crediting)
-- Votes (UP/DOWN enum, cached counts, public profile votes)
-- Awards (catalog, multi-grant, granters endpoint gated by pay-to-unlock with `unlockCoins`)
-- `unlockCoins` Postgres trigger: every 10 awards granted → +5 unlockCoins
-- Achievements (DB-driven catalog, event-bus engine, SSE live notifications)
-- Visibility threshold (comments with net score < -5 flagged `hidden`)
-- Migrations adopted (versioned `prisma/migrations/`, `bun db:migrate-deploy` auto-handles triggers)
+The full backend backbone is done. Frontend is the only remaining build.
 
-## Not yet built (in rough priority order)
+- **Auth** — Better Auth + `username` plugin (validation, login-by-username, `is-username-available`) + `emailOTP` plugin (email verification / password reset / OTP sign-in — `sendVerificationOTP` console-logs in dev, swap for Resend in prod) + rate limiting on auth surfaces. `requireEmailVerification` is OFF until the FE has a verify UX.
+- **Identity** — `username` (unique), `gender` (enum), `animal` (enum: CHICKEN/DOG/GOOSE), `avatarSeed` (int). Animal+seed server-injected at signup via Better Auth before-create hook (`rollIdentity()` in `src/utils/identity.ts`). `POST /users/me/avatar/reroll` — click-is-commit.
+- **Posts, comments, media** — soft-delete + redaction.
+- **Coins** — Stripe checkout, webhook crediting.
+- **Votes** — UP/DOWN enum, cached counts, public profile votes.
+- **Awards** — catalog, multi-grant, granters endpoint gated by pay-to-unlock with `unlockCoins`.
+- **`unlockCoins` Postgres trigger** — every 10 awards granted → +5 unlockCoins.
+- **Achievements** — DB-driven catalog, in-process event-bus engine, SSE live notifications (`GET /users/me/events`).
+- **Visibility threshold** — comments with net score < -5 flagged `hidden`.
+- **Geo** — PostGIS on Post only (`geo` generated column from lat/lng, GIST-indexed). User geo NOT stored server-side — FE passes coords per request (privacy + "browse elsewhere"). `POST /posts` requires lat/lng. `GET /posts?lat=&lng=&radius=` filters via `ST_DWithin`.
+- **Ranking** — `GET /posts?sort=rank` composite score (geo penalty + time-decayed votes + animal affinity). Default `sort=newest`. Affinity derived server-side from signed-in user (NOT a URL param). Weights tunable in `src/utils/ranking.ts`. Falls back to newest if no geo.
+- **AI moderation** — OpenAI `omni-moderation-latest` (free), gates `POST /posts` + `POST /comments` before insert. Hate/threats/self-harm/CSAM/graphic-violence blocked; plain harassment/profanity/non-minor-sexual allowed (the "spice"). Fail-open (missing key / API error / network → allow + log). Hard-reject with 422 `CONTENT_FLAGGED` + human `reason`. Block list tunable in `src/utils/ai/moderator.ts`.
+- **Migrations adopted** — versioned `prisma/migrations/`, `bun db:migrate-deploy` auto-materializes the trigger migration. PostGIS setup is a manual-SQL block in the `add_post_geo` migration.
 
-- Animal/username/gender on User schema
-- Procedural SVG avatar generation
-- Random-roll signup flow (reroll until commit)
-- PostGIS geo columns on Post and User
-- Geo-filtered feed query
-- Ranking formula (`src/utils/ranking.ts`)
-- AI moderation pipeline (`src/utils/ai/moderator.ts` — OpenAI Moderation API)
-- Frontend (heavy SVG/GSAP, math-driven animations)
+## Not yet built
+
+- **Frontend** — the whole punk SVG/GSAP farm. Backend serves every primitive it needs.
+- Procedural SVG avatar rendering (frontend; backend already supplies `animal` + `avatarSeed`).
+- "Bushy border" derivation rule (frontend decision).
+- Richer animal-affinity ("weight votes by same-species voters") — deferred until simple flat bonus proves insufficient.
+- More animals / achievements — seed + enum additions, no architecture.
 
 ## Pre-launch hygiene (deferred but real)
 
 - Set `NODE_ENV=production` on the deploy host (Railway is the plan). `src/utils/env.ts:isProd()` keys off it.
+- **Real email send** — replace the `console.log` in `auth.ts`'s `sendVerificationOTP` with Resend/Postmark/SendGrid. Then flip `requireEmailVerification: true`.
+- `OPENAI_API_KEY` set in prod env (moderation fails open without it).
 - Stripe live keys + webhook secret separate from dev.
-- Privacy notice / TOS that's honest about what's logged (IP, timestamps, content) vs. what's anonymous (no real-name identity link).
-- Age gate (Apple/Google both rate "anonymous social" as 17+; pre-emptive).
+- Privacy notice / TOS — honest about what's logged (IP, timestamps, content) vs. anonymous (no real-name link).
+- Age gate (Apple/Google both rate "anonymous social" 17+; pre-emptive).

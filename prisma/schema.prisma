@@ -194,6 +194,20 @@ model Post {
   deletedAt     DateTime?
   upvoteCount   Int         @default(0)
   downvoteCount Int         @default(0)
+  // false = OpenAI was unreachable at post time, content slipped through
+  // unjudged (fail-open). The FE renders these with an UNMODERATED badge —
+  // rare-by-nature collectibles, can't be farmed. true = OpenAI judged it.
+  moderated     Boolean     @default(true)
+  // PostGIS generated column. Postgres maintains it automatically from
+  // latitude/longitude — every insert/update recomputes it, no app code.
+  // Prisma can't express `GENERATED ALWAYS AS`, so:
+  //  - Unsupported(...)        → Prisma won't model the type
+  //  - @default(dbgenerated()) → "the DB owns this value", stops Prisma
+  //                              emitting `ALTER COLUMN geo DROP DEFAULT`
+  // The init migration's geo line is hand-written ONCE as GENERATED
+  // (Prisma scaffolds it as a plain column; we replace that one line).
+  // Never read/written via Prisma client — $queryRaw + ST_DWithin only.
+  geo           Unsupported("geography(Point, 4326)")? @default(dbgenerated())
   media         PostMedia[]
   comments      Comment[]
   votes         PostVote[]
@@ -202,10 +216,9 @@ model Post {
 
   @@index([authorId])
   @@index([createdAt])
-  // Note: spatial radius queries hit the GIST index on the generated
-  // `geo` column (created by the migration's manual SQL). No need for a
-  // composite (latitude, longitude) B-tree — the GIST handles all
-  // distance work natively and faster.
+  // Prisma-managed GIST index — declared here so Prisma creates it AND
+  // never tries to drop it (this was a big source of the earlier pain).
+  @@index([geo], type: Gist)
   @@map("post")
 }
 
@@ -252,6 +265,8 @@ model Comment {
   deletedAt       DateTime?
   upvoteCount     Int                     @default(0)
   downvoteCount   Int                     @default(0)
+  // See Post.moderated — same semantics. false = slipped through unjudged.
+  moderated       Boolean                 @default(true)
   votes           CommentVote[]
   awards          CommentAward[]
   unlocks         CommentGrantersUnlock[]

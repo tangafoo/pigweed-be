@@ -5,6 +5,7 @@ import { makeId, ID_PREFIX } from "../utils/ids";
 import { bus } from "../events/bus";
 import { isValidLatLng, DEFAULT_RADIUS_KM } from "../utils/geo";
 import { RANKING_WEIGHTS } from "../utils/ranking";
+import { moderate } from "../utils/ai/moderator";
 import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
 import { optionalSignIn, type ViewerVars } from "../middleware/optional-sign-in";
 
@@ -147,6 +148,7 @@ const postSelect = {
   updatedAt: true,
   upvoteCount: true,
   downvoteCount: true,
+  moderated: true,
   author: { select: { id: true, name: true, image: true } },
   media: {
     select: { id: true, url: true, kind: true, order: true, width: true, height: true },
@@ -322,6 +324,16 @@ posts.post("/", requireSignIn, async (c) => {
   const mediaResult = parseMedia(body?.media);
   if (!Array.isArray(mediaResult)) return c.json(mediaResult, 400);
 
+  // Moderation gate — title + body checked together. Fail-open inside
+  // moderate(); a block here means it genuinely tripped a category.
+  const mod = await moderate(`${title}\n\n${content}`);
+  if (!mod.allowed) {
+    return c.json(
+      { error: `flagged for ${mod.reason}`, code: "CONTENT_FLAGGED", categories: mod.categories },
+      422,
+    );
+  }
+
   const post = await prisma.post.create({
     data: {
       id: makeId(ID_PREFIX.POST),
@@ -330,6 +342,7 @@ posts.post("/", requireSignIn, async (c) => {
       body: content,
       latitude,
       longitude,
+      moderated: mod.moderated,
       media: mediaResult.length > 0
         ? {
           create: mediaResult.map((m) => ({

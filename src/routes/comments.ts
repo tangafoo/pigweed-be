@@ -3,6 +3,7 @@ import { prisma } from "../utils/db";
 import { VoteValue } from "../generated/prisma/client";
 import { makeId, ID_PREFIX } from "../utils/ids";
 import { bus } from "../events/bus";
+import { moderate } from "../utils/ai/moderator";
 import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
 import { optionalSignIn, type ViewerVars } from "../middleware/optional-sign-in";
 
@@ -31,6 +32,7 @@ const commentSelect = {
   deletedAt: true,
   upvoteCount: true,
   downvoteCount: true,
+  moderated: true,
   author: { select: { id: true, name: true, image: true } },
 } as const;
 
@@ -143,8 +145,16 @@ comments.post("/posts/:postId/comments", requireSignIn, async (c) => {
     depth = parent.depth + 1;
   }
 
+  const mod = await moderate(text);
+  if (!mod.allowed) {
+    return c.json(
+      { error: `flagged for ${mod.reason}`, code: "CONTENT_FLAGGED", categories: mod.categories },
+      422,
+    );
+  }
+
   const comment = await prisma.comment.create({
-    data: { id: makeId(ID_PREFIX.COMMENT), postId, authorId: userId, parentCommentId, depth, body: text },
+    data: { id: makeId(ID_PREFIX.COMMENT), postId, authorId: userId, parentCommentId, depth, body: text, moderated: mod.moderated },
     select: commentSelect,
   });
 
