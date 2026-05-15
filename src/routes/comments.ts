@@ -10,6 +10,13 @@ export const comments = new Hono<AuthVars & ViewerVars>();
 
 const BODY_MAX = 5000;
 
+// A comment is flagged hidden=true when its net score (upvotes minus
+// downvotes) drops below this value. Forgiving — a popular-but-spicy
+// comment with 100 ups and 10 downs (net +90) stays visible; only
+// genuinely-downvoted content is collapsed. Body still ships so the
+// frontend can offer a click-to-reveal UX.
+const HIDE_BELOW_SCORE = -5;
+
 // Single source of truth for the comment shape returned by every endpoint.
 // `deletedAt` and `postId` are included so the redactor and downstream
 // queries can use them. Author is trimmed to non-sensitive fields.
@@ -180,6 +187,7 @@ comments.get("/posts/:postId/comments", optionalSignIn, async (c) => {
       ...redactIfDeleted(r),
       myVote: voteByCommentId.get(r.id) ?? null,
       awards: awardsByCommentId.get(r.id) ?? [],
+      hidden: r.upvoteCount - r.downvoteCount < HIDE_BELOW_SCORE,
     })),
   });
 });
@@ -244,11 +252,13 @@ comments.get("/comments/:id/replies", optionalSignIn, async (c) => {
       ...redactIfDeleted(parent),
       myVote: voteByCommentId.get(parent.id) ?? null,
       awards: awardsByCommentId.get(parent.id) ?? [],
+      hidden: parent.upvoteCount - parent.downvoteCount < HIDE_BELOW_SCORE,
     },
     comments: descendants.map((d) => ({
       ...redactIfDeleted(d),
       myVote: voteByCommentId.get(d.id) ?? null,
       awards: awardsByCommentId.get(d.id) ?? [],
+      hidden: d.upvoteCount - d.downvoteCount < HIDE_BELOW_SCORE,
     })),
   });
 });
