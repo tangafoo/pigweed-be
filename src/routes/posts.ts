@@ -4,6 +4,7 @@ import { VoteValue } from "../generated/prisma/client";
 import { makeId, ID_PREFIX } from "../utils/ids";
 import { bus } from "../events/bus";
 import { isValidLatLng, DEFAULT_RADIUS_KM } from "../utils/geo";
+import { RANKING_WEIGHTS } from "../utils/ranking";
 import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
 import { optionalSignIn, type ViewerVars } from "../middleware/optional-sign-in";
 
@@ -162,12 +163,29 @@ posts.get("/", optionalSignIn, async (c) => {
   const latStr = c.req.query("lat");
   const lngStr = c.req.query("lng");
   const radiusStr = c.req.query("radius");
-  const viewer = isValidLatLng({ latitude: Number(latStr), longitude: Number(lngStr) })
+  const viewerLocation = isValidLatLng({ latitude: Number(latStr), longitude: Number(lngStr) })
     ? { latitude: Number(latStr), longitude: Number(lngStr) }
     : null;
   const radiusKm = Number.isFinite(Number(radiusStr)) && Number(radiusStr) > 0
     ? Number(radiusStr)
     : DEFAULT_RADIUS_KM;
+
+  // Sort mode. ?sort=rank → composite score (the "hot" feed). Anything
+  // else → newest first. Ranking REQUIRES geo (the formula has a
+  // distance term); fall back silently to newest if geo is missing.
+  const sortMode = c.req.query("sort") === "rank" && viewerLocation ? "rank" : "newest";
+
+  // Viewer's animal for affinity. Derived server-side from the signed-in
+  // user — NOT trusted from any client input. If the request is anonymous
+  // or sort isn't rank, we skip the lookup entirely.
+  const viewerId = c.get("viewerId");
+  const viewerAnimal =
+    sortMode === "rank" && viewerId
+      ? (await prisma.user.findUnique({
+          where: { id: viewerId },
+          select: { animal: true },
+        }))?.animal ?? ""
+      : "";
 
   // PostGIS does the radius math. The `geo` column on post is a generated
   // geography(Point, 4326) maintained by Postgres from latitude/longitude;
@@ -178,26 +196,53 @@ posts.get("/", optionalSignIn, async (c) => {
   // DB), then a regular Prisma findMany resolves the full payload through
   // postSelect so we don't have to hand-roll the relation joins.
   let rows: Array<typeof postSelect extends infer _ ? any : never>;
-  if (viewer) {
+  if (viewerLocation) {
     const offset = (page - 1) * limit;
-    const idRows = await prisma.$queryRaw<{ id: string }[]>`
-      SELECT id FROM "post"
-      WHERE "deletedAt" IS NULL
-        AND ST_DWithin(
-          geo,
-          ST_SetSRID(ST_MakePoint(${viewer.longitude}, ${viewer.latitude}), 4326)::geography,
-          ${radiusKm * 1000}
-        )
-      ORDER BY "createdAt" DESC
-      LIMIT ${limit} OFFSET ${offset}
-    `;
+
+    // Both sort modes use $queryRaw — newest still needs ST_DWithin for
+    // the radius filter; rank additionally orders by the composite score.
+    // The score math runs entirely in Postgres so OFFSET/LIMIT pagination
+    // works correctly (no JS-side re-sorting that could break pages).
+    const idRows = sortMode === "rank"
+      ? await prisma.$queryRaw<{ id: string }[]>`
+          SELECT post.id
+          FROM "post"
+          LEFT JOIN "user" ON "user".id = post."authorId"
+          WHERE post."deletedAt" IS NULL
+            AND ST_DWithin(
+              post.geo,
+              ST_SetSRID(ST_MakePoint(${viewerLocation.longitude}, ${viewerLocation.latitude}), 4326)::geography,
+              ${radiusKm * 1000}
+            )
+          ORDER BY (
+            -${RANKING_WEIGHTS.geoPerKm} * (
+              ST_Distance(post.geo, ST_SetSRID(ST_MakePoint(${viewerLocation.longitude}, ${viewerLocation.latitude}), 4326)::geography) / 1000.0
+            )
+            + ${RANKING_WEIGHTS.votesGain} * (post."upvoteCount" - post."downvoteCount")
+              / GREATEST(1, EXTRACT(EPOCH FROM (NOW() - post."createdAt")) / 3600.0 + 2.0)
+            + CASE WHEN "user".animal::text = ${viewerAnimal} THEN ${RANKING_WEIGHTS.affinityBonus} ELSE 0 END
+          ) DESC
+          LIMIT ${limit} OFFSET ${offset}
+        `
+      : await prisma.$queryRaw<{ id: string }[]>`
+          SELECT id FROM "post"
+          WHERE "deletedAt" IS NULL
+            AND ST_DWithin(
+              geo,
+              ST_SetSRID(ST_MakePoint(${viewerLocation.longitude}, ${viewerLocation.latitude}), 4326)::geography,
+              ${radiusKm * 1000}
+            )
+          ORDER BY "createdAt" DESC
+          LIMIT ${limit} OFFSET ${offset}
+        `;
+
     const ids = idRows.map((r) => r.id);
     const fetched = await prisma.post.findMany({
       where: { id: { in: ids } },
       select: postSelect,
     });
     // findMany doesn't preserve the IN-clause order; re-sort to match
-    // the DB-side ORDER BY createdAt DESC the raw query gave us.
+    // whatever ORDER BY the raw query gave us.
     const byId = new Map(fetched.map((p) => [p.id, p]));
     rows = ids.map((id) => byId.get(id)).filter((p): p is NonNullable<typeof p> => p != null);
   } else {
@@ -212,7 +257,7 @@ posts.get("/", optionalSignIn, async (c) => {
 
   const postIds = rows.map((r) => r.id);
   const [voteByPostId, awardsByPostId] = await Promise.all([
-    viewerVotes(c.get("viewerId"), postIds),
+    viewerVotes(viewerId, postIds),
     awardSummaries(postIds),
   ]);
 
@@ -224,7 +269,8 @@ posts.get("/", optionalSignIn, async (c) => {
     })),
     page,
     limit,
-    radiusKm: viewer ? radiusKm : null,
+    radiusKm: viewerLocation ? radiusKm : null,
+    sort: sortMode,
   });
 });
 
