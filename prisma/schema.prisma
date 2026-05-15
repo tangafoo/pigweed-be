@@ -25,7 +25,12 @@ model User {
   image         String?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
-  coinBalance        Int            @default(0)
+  coinBalance        Int                     @default(0)
+  // Separate "currency" from coinBalance: earned (not bought) by granting
+  // awards — every 10 grants → +5 unlockCoins via a Postgres trigger.
+  // Spent on unlocking the attributed granters list for a post/comment.
+  // NOT fungible with coinBalance.
+  unlockCoins        Int                     @default(0)
   sessions           Session[]
   accounts           Account[]
   purchases          CoinPurchase[]
@@ -35,6 +40,9 @@ model User {
   commentVotes       CommentVote[]
   postAwardsGiven    PostAward[]
   commentAwardsGiven CommentAward[]
+  postUnlocks        PostGrantersUnlock[]
+  commentUnlocks     CommentGrantersUnlock[]
+  achievements       UserAchievement[]
 
   @@unique([email])
   @@map("user")
@@ -151,6 +159,7 @@ model Post {
   comments      Comment[]
   votes         PostVote[]
   awards        PostAward[]
+  unlocks       PostGrantersUnlock[]
 
   @@index([authorId])
   @@index([createdAt])
@@ -198,10 +207,11 @@ model Comment {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   deletedAt       DateTime?
-  upvoteCount     Int            @default(0)
-  downvoteCount   Int            @default(0)
+  upvoteCount     Int                     @default(0)
+  downvoteCount   Int                     @default(0)
   votes           CommentVote[]
   awards          CommentAward[]
+  unlocks         CommentGrantersUnlock[]
 
   @@index([postId])
   @@index([authorId])
@@ -322,4 +332,87 @@ model CommentAward {
   @@index([granterId])
   @@index([commentId, awardTypeId])
   @@map("comment_award")
+}
+
+// ─────────────────────────────────────────────────────────────
+// GRANTERS UNLOCKS — viewer X has unlocked the attributed
+// granter list for post/comment Y, forever. unlockCoins earned
+// by being generous (every 10 awards granted → +5 on User,
+// applied via a Postgres trigger), spent here. Composite PK
+// guarantees one row per (viewer, target).
+// ─────────────────────────────────────────────────────────────
+
+model PostGrantersUnlock {
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postId     String
+  post       Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  unlockedAt DateTime @default(now())
+
+  @@id([userId, postId])
+  @@index([postId])
+  @@map("post_granters_unlock")
+}
+
+model CommentGrantersUnlock {
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  commentId  String
+  comment    Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  unlockedAt DateTime @default(now())
+
+  @@id([userId, commentId])
+  @@index([commentId])
+  @@map("comment_granters_unlock")
+}
+
+// ─────────────────────────────────────────────────────────────
+// ACHIEVEMENTS — admin-seeded catalog + per-user grant ledger.
+// Granted once per user (composite PK), triggers via in-process
+// event bus (see src/events/bus.ts + src/utils/achievements.ts).
+// Each grant atomically credits rewardCoins to User.coinBalance.
+//
+// DB-driven catalog: each Achievement row declares which metric
+// to read (POSTS_CREATED, AWARDS_GRANTED, etc.) and the
+// threshold to clear. Adding a new achievement = INSERT a row.
+// Adding a new METRIC = enum migration + one new case in the
+// metric → COUNT mapper (src/utils/achievements.ts).
+// ─────────────────────────────────────────────────────────────
+
+enum AchievementMetric {
+  POSTS_CREATED
+  COMMENTS_CREATED
+  AWARDS_GRANTED
+
+  @@map("achievement_metric")
+}
+
+model Achievement {
+  id          String            @id @default(cuid())
+  key         String            @unique
+  name        String
+  description String
+  metric      AchievementMetric
+  threshold   Int
+  rewardCoins Int
+  active      Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  grants      UserAchievement[]
+
+  @@index([metric, active])
+  @@map("achievement")
+}
+
+model UserAchievement {
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievementId String
+  achievement   Achievement @relation(fields: [achievementId], references: [id])
+  rewardCoins   Int
+  grantedAt     DateTime    @default(now())
+
+  @@id([userId, achievementId])
+  @@index([userId])
+  @@map("user_achievement")
 }

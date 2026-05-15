@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { prisma } from "../utils/db";
 import { VoteValue } from "../generated/prisma/client";
 import { makeId, ID_PREFIX } from "../utils/ids";
+import { bus } from "../events/bus";
 import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
 import { optionalSignIn, type ViewerVars } from "../middleware/optional-sign-in";
 
@@ -139,6 +140,8 @@ comments.post("/posts/:postId/comments", requireSignIn, async (c) => {
     data: { id: makeId(ID_PREFIX.COMMENT), postId, authorId: userId, parentCommentId, depth, body: text },
     select: commentSelect,
   });
+
+  bus.emit({ type: "comment_created", userId });
 
   return c.json({ comment }, 201);
 });

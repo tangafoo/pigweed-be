@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { prisma } from "../utils/db";
 import { VoteValue } from "../generated/prisma/client";
 import { makeId, ID_PREFIX } from "../utils/ids";
+import { bus } from "../events/bus";
 import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
 import { optionalSignIn, type ViewerVars } from "../middleware/optional-sign-in";
 
@@ -234,6 +235,8 @@ posts.post("/", requireSignIn, async (c) => {
     },
     select: postSelect,
   });
+
+  bus.emit({ type: "post_created", userId });
 
   return c.json({ post }, 201);
 });

@@ -1,6 +1,8 @@
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import { prisma } from "../utils/db";
-import { type AuthVars } from "../middleware/require-sign-in";
+import { bus } from "../events/bus";
+import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
 
 export const users = new Hono<AuthVars>();
 
@@ -79,4 +81,83 @@ users.get("/:userId/votes", async (c) => {
     if (target === "comments") return c.json({ commentVotes, page, limit });
     if (target === "posts") return c.json({ postVotes, page, limit });
     return c.json({ commentVotes, postVotes, page, limit });
+});
+
+// ─────────────────────────────────────────────────────────────
+// GET /users/:userId/achievements
+// Public. Lists which catalog achievements this user has earned,
+// with rewardCoins snapshot and grantedAt.
+// ─────────────────────────────────────────────────────────────
+
+users.get("/:userId/achievements", async (c) => {
+    const userId = c.req.param("userId");
+
+    const [user, rows] = await Promise.all([
+        prisma.user.findUnique({ where: { id: userId }, select: { id: true } }),
+        prisma.userAchievement.findMany({
+            where: { userId },
+            orderBy: { grantedAt: "desc" },
+            select: {
+                grantedAt: true,
+                achievement: {
+                    select: { id: true, key: true, name: true, description: true, metric: true, threshold: true },
+                },
+            },
+        }),
+    ]);
+
+    if (!user) return c.json({ error: "user not found" }, 404);
+
+    return c.json({ achievements: rows });
+});
+
+// ─────────────────────────────────────────────────────────────
+// GET /users/me/events — SSE stream
+// One open HTTP connection per signed-in client. Server pushes
+// achievement_unlocked events (and future event types) the
+// instant they fire on the bus, scoped to this user. Frontend
+// subscribes once on sign-in, listens forever, renders toasts.
+// ─────────────────────────────────────────────────────────────
+
+users.get("/me/events", requireSignIn, async (c) => {
+    const userId = c.get("userId");
+
+    return streamSSE(c, async (stream) => {
+        // Initial "hello" event so the client knows the stream opened.
+        // Some browsers/proxies hold the first byte; this flushes.
+        await stream.writeSSE({ event: "connected", data: JSON.stringify({ userId }) });
+
+        // Subscribe to the bus, filtered by this user's id. The returned
+        // unsubscribe is captured so we can clean up when the client
+        // disconnects (otherwise we'd leak a listener per request).
+        const unsubscribe = bus.on("achievement_unlocked", async (event) => {
+            if (event.userId !== userId) return;
+            await stream.writeSSE({
+                event: "achievement_unlocked",
+                data: JSON.stringify({
+                    achievement: event.achievement,
+                    newCoinBalance: event.newCoinBalance,
+                }),
+            });
+        });
+
+        // Heartbeat — without periodic traffic, intermediate proxies (or
+        // Bun's own connection management) can drop an idle SSE stream.
+        // A comment line every 25s keeps the pipe warm without spamming
+        // the client with meaningful events.
+        const heartbeat = setInterval(() => {
+            stream.writeSSE({ event: "ping", data: "" }).catch(() => {});
+        }, 25_000);
+
+        // Hono's stream resolves the outer promise when the client
+        // disconnects (via stream.onAbort). Clean up listeners + timer.
+        stream.onAbort(() => {
+            unsubscribe();
+            clearInterval(heartbeat);
+        });
+
+        // Hold the stream open by awaiting a never-resolving promise.
+        // The client controls termination via abort.
+        await new Promise<void>(() => {});
+    });
 });

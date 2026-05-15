@@ -20,9 +20,12 @@ coins.get("/balance", requireSignIn, async (c) => {
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { coinBalance: true },
+    select: { coinBalance: true, unlockCoins: true },
   });
-  return c.json({ balance: user?.coinBalance ?? 0 });
+  return c.json({
+    balance: user?.coinBalance ?? 0,
+    unlockCoins: user?.unlockCoins ?? 0,
+  });
 });
 
 coins.post("/checkout", requireSignIn, async (c) => {

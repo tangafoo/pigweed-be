@@ -8,6 +8,11 @@ import { comments } from './routes/comments'
 import { votes } from './routes/votes'
 import { users } from './routes/users'
 import { awards } from './routes/awards'
+import { registerAchievementListeners } from './utils/achievements'
+
+// Wire the achievement engine to the event bus at startup. After this
+// runs, action handlers can emit domain events and the engine reacts.
+registerAchievementListeners()
 
 const app = new Hono()
 
