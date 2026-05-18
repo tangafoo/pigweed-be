@@ -1,21 +1,27 @@
-```txt
-npm install
-npm run dev
+# pigweed-be
+
+Backend for pigweed — an anonymous, hyperlocal, animal-themed social
+network. Bun + Hono + Prisma 7 + Better Auth + Supabase Postgres
+(PostGIS) + Stripe. Deploy target: **Railway**.
+
+See `CLAUDE.md` for the full product brief, data/identity/geo models,
+moderation rules, and the shared API contract.
+
+## Develop
+
+```sh
+cp .env.example .env   # fill in DB URL, auth secret, Stripe/OpenAI keys
+bun install
+bun run db:migrate-deploy   # first run only
+bun run seed:all            # first run only
+bun run dev                 # watch mode on :3000
 ```
 
-```txt
-npm run deploy
-```
+## Common commands
 
-[For generating/synchronizing types based on your Worker configuration run](https://developers.cloudflare.com/workers/wrangler/commands/#types):
-
-```txt
-npm run cf-typegen
-```
-
-Pass the `CloudflareBindings` as generics when instantiation `Hono`:
-
-```ts
-// src/index.ts
-const app = new Hono<{ Bindings: CloudflareBindings }>()
+```sh
+bun test                 # tests
+bun run typecheck        # tsc --noEmit
+bun run db:studio        # Prisma Studio
+bun run stripe:listen    # forward Stripe webhooks to localhost:3000
 ```
