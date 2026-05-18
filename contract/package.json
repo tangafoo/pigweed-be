@@ -1,0 +1,33 @@
+{
+  "name": "@meteorclass/pigweed-contract",
+  "version": "0.1.0",
+  "description": "Shared API contract (enums + wire shapes) for pigweed. Single source of truth — pigweed-fe consumes this; do not hand-maintain copies.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p .",
+    "dev": "tsc -p . --watch --preserveWatchOutput",
+    "prepublishOnly": "tsc -p ."
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

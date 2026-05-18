@@ -1,5 +1,7 @@
 import { Hono } from 'hono'
 import { logger } from 'hono/logger'
+import { cors } from 'hono/cors'
+import { allowedOrigins } from './utils/env'
 import { auth } from './utils/auth'
 import { coins } from './routes/coins'
 import { stripeWebhook } from './routes/stripe-webhook'
@@ -17,6 +19,18 @@ registerAchievementListeners()
 const app = new Hono()
 
 app.use(logger())
+
+// Browser auth is cookie-based, so the FE sends credentialed cross-origin
+// requests. That requires an explicit (non-"*") allowed origin + the
+// credentials flag. Origins are env-driven (see allowedOrigins) — prod is
+// a CORS_ORIGIN change, nothing here moves. Handles OPTIONS preflight too.
+app.use(
+  '*',
+  cors({
+    origin: allowedOrigins(),
+    credentials: true,
+  }),
+)
 
 app.get('/', (c) => {
   return c.text('Hello Bitch ass!')

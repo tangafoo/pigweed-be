@@ -3,6 +3,7 @@ import { username, emailOTP } from "better-auth/plugins";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { prisma } from "./db";
 import { rollIdentity } from "./identity";
+import { allowedOrigins } from "./env";
 
 const c = (color: string, msg: string) => `\x1b[${color}m${msg}\x1b[0m`;
 
@@ -10,6 +11,9 @@ export const auth = betterAuth({
     database: prismaAdapter(prisma, {
         provider: "postgresql",
     }),
+    // CSRF allow-list for credentialed cross-origin auth calls from the
+    // FE. Same source as the CORS origins so the two never drift apart.
+    trustedOrigins: allowedOrigins(),
     emailAndPassword: {
         enabled: true,
         // Enforcement of email verification at sign-in is deliberately OFF

@@ -20,7 +20,6 @@ The visual identity is heavy SVG, GSAP-animated, math-driven. Visual state deriv
 4. **Anonymous within the community, never toward an individual.** No anonymous DMs. No "send a message to this specific person" surface, ever. Sarahah and NGL died of this; learn the lesson.
 5. **Be honest about what's anonymous.** Posts: public and anonymous. IPs: logged for moderation. Account age: surfaced. Tell users this; never trade on a privacy promise you can't keep.
 6. **Data state shapes UI state, not the reverse.** Vote counts drive bushiness; downvote thresholds drive collapse; geo distance drives feed inclusion. The backend never embeds visual concepts; the frontend interprets the numbers.
-7. **Stay solo-dev simple until pain forces growth.** Formulas over ML for ranking until the math hurts. In-process EventEmitter over Redis pub/sub until multi-server hurts. Hand-drawn SVG over AI generation until uniqueness becomes a real bottleneck.
 
 ## Identity model
 
