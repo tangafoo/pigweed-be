@@ -7,6 +7,19 @@ import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
 
 export const users = new Hono<AuthVars>();
 
+// ─────────────────────────────────────────────────────────────
+// GET /users/count
+// Public farm headcount — FE renders "N animals on the farm".
+// Registered before the `/:userId/...` routes so the static path
+// isn't shadowed. Cheap: `count` is a single COUNT(*) — no
+// caching layer until traffic says otherwise.
+// ─────────────────────────────────────────────────────────────
+
+users.get("/count", async (c) => {
+    const count = await prisma.user.count();
+    return c.json({ count });
+});
+
 // Whitelist of acceptable `?target=` values. Anything else 400s rather than
 // silently returning both arrays — protects against frontend typos like
 // `?target=Post` (capital P) going unnoticed.

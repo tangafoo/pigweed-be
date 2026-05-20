@@ -107,6 +107,12 @@ export const Session = z.object({
 });
 export type Session = z.infer<typeof Session>;
 
+/** GET /users/count — public farm headcount, used for "N animals on the farm" copy. */
+export const UserCount = z.object({
+	count: z.number().int().nonnegative()
+});
+export type UserCount = z.infer<typeof UserCount>;
+
 /* ─── Posts ───────────────────────────────────────────────────────── */
 
 export const Post = z.object({

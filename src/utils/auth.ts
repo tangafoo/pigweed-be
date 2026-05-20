@@ -89,7 +89,20 @@ export const auth = betterAuth({
             create: {
                 before: async (user) => {
                     const { animal, avatarSeed } = rollIdentity();
-                    return { data: { ...user, animal, avatarSeed } };
+                    // pigweed has no separate "display name" concept — the handle
+                    // IS the identity. Force displayUsername to mirror username so
+                    // they can never drift apart. Better Auth's plugin would
+                    // otherwise stash the original-case input in displayUsername
+                    // and the lowercased form in username; here both end up
+                    // lowercased + identical. See memory: username-equals-display-username.
+                    return {
+                        data: {
+                            ...user,
+                            animal,
+                            avatarSeed,
+                            displayUsername: user.username,
+                        },
+                    };
                 },
             },
         },

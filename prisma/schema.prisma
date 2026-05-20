@@ -51,8 +51,13 @@ model User {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   // Identity — animals on the pigweed farm. See CLAUDE.md.
-  username      String         @unique
-  gender        Gender
+  // `username` is the normalized (lowercased) form Better Auth's username
+  // plugin uses for uniqueness + login lookup. `displayUsername` preserves
+  // the original casing the user typed (e.g. "Obi-Wan") for UI rendering.
+  // Plugin writes both on signup; the create() blows up if either is missing.
+  username        String       @unique
+  displayUsername String?
+  gender          Gender
   animal        Animal
   avatarSeed    Int            // feeds deterministic FE color/pattern math
   // Note: pigweed does NOT store user current geo. The FE knows where
