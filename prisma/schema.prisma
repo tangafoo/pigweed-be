@@ -43,23 +43,23 @@ enum Gender {
 // ─────────────────────────────────────────────────────────────
 
 model User {
-  id            String         @id
-  name          String
-  email         String
-  emailVerified Boolean        @default(false)
-  image         String?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  id                 String                  @id
+  name               String
+  email              String
+  emailVerified      Boolean                 @default(false)
+  image              String?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
   // Identity — animals on the pigweed farm. See CLAUDE.md.
   // `username` is the normalized (lowercased) form Better Auth's username
   // plugin uses for uniqueness + login lookup. `displayUsername` preserves
   // the original casing the user typed (e.g. "Obi-Wan") for UI rendering.
   // Plugin writes both on signup; the create() blows up if either is missing.
-  username        String       @unique
-  displayUsername String?
-  gender          Gender
-  animal        Animal
-  avatarSeed    Int            // feeds deterministic FE color/pattern math
+  username           String                  @unique
+  displayUsername    String?
+  gender             Gender
+  animal             Animal
+  avatarSeed         Int // feeds deterministic FE color/pattern math
   // Note: pigweed does NOT store user current geo. The FE knows where
   // the user is (browser geolocation API) and sends lat/lng on each
   // request that needs it (post creation, feed query). Privacy-cleaner;
@@ -82,9 +82,33 @@ model User {
   postUnlocks        PostGrantersUnlock[]
   commentUnlocks     CommentGrantersUnlock[]
   achievements       UserAchievement[]
+  passkeys           Passkey[]
 
   @@unique([email])
   @@map("user")
+}
+
+// Better Auth's passkey plugin owns this table. Field shape MUST match the
+// plugin's expected schema (see https://better-auth.com/docs/plugins/passkey):
+// any drift and the plugin's own create()/update() calls will fail at runtime
+// the same way the username plugin's `displayUsername` did. `aaguid` is the
+// authenticator's model identifier (Apple/Yubico/etc.) — useful for "you
+// signed in from Touch ID" UX later.
+model Passkey {
+  id           String    @id
+  name         String?
+  publicKey    String
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credentialID String
+  counter      Int
+  deviceType   String
+  backedUp     Boolean
+  transports   String?
+  createdAt    DateTime?
+  aaguid       String?
+
+  @@map("passkey")
 }
 
 model Session {
@@ -184,9 +208,9 @@ model CoinPurchase {
 // ─────────────────────────────────────────────────────────────
 
 model Post {
-  id            String      @id @default(cuid())
+  id            String                                 @id @default(cuid())
   authorId      String
-  author        User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  author        User                                   @relation(fields: [authorId], references: [id], onDelete: Cascade)
   title         String
   body          String
   // Frozen at creation — the post belongs to a place. Not nullable
@@ -194,15 +218,15 @@ model Post {
   // geo can't be filtered into anyone's feed.
   latitude      Float
   longitude     Float
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  createdAt     DateTime                               @default(now())
+  updatedAt     DateTime                               @updatedAt
   deletedAt     DateTime?
-  upvoteCount   Int         @default(0)
-  downvoteCount Int         @default(0)
+  upvoteCount   Int                                    @default(0)
+  downvoteCount Int                                    @default(0)
   // false = OpenAI was unreachable at post time, content slipped through
   // unjudged (fail-open). The FE renders these with an UNMODERATED badge —
   // rare-by-nature collectibles, can't be farmed. true = OpenAI judged it.
-  moderated     Boolean     @default(true)
+  moderated     Boolean                                @default(true)
   // PostGIS generated column. Postgres maintains it automatically from
   // latitude/longitude — every insert/update recomputes it, no app code.
   // Prisma can't express `GENERATED ALWAYS AS`, so:
@@ -255,18 +279,18 @@ model PostMedia {
 // The named relation "CommentReplies" is required by Prisma because
 // the model has two relations to the same model (parent + replies).
 model Comment {
-  id              String        @id @default(cuid())
+  id              String                  @id @default(cuid())
   postId          String
-  post            Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  post            Post                    @relation(fields: [postId], references: [id], onDelete: Cascade)
   authorId        String
-  author          User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  author          User                    @relation(fields: [authorId], references: [id], onDelete: Cascade)
   parentCommentId String?
-  parentComment   Comment?      @relation("CommentReplies", fields: [parentCommentId], references: [id], onDelete: Cascade)
-  replies         Comment[]     @relation("CommentReplies")
-  depth           Int           @default(0)
+  parentComment   Comment?                @relation("CommentReplies", fields: [parentCommentId], references: [id], onDelete: Cascade)
+  replies         Comment[]               @relation("CommentReplies")
+  depth           Int                     @default(0)
   body            String
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
   deletedAt       DateTime?
   upvoteCount     Int                     @default(0)
   downvoteCount   Int                     @default(0)

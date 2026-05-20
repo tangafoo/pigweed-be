@@ -13,10 +13,29 @@ export function isProd(): boolean {
 // CORS middleware and Better Auth's trustedOrigins (CSRF allow-list), so
 // they can never disagree. Comma-separated; dev defaults to the
 // SvelteKit dev server. In prod set CORS_ORIGIN to the deployed FE URL
-// (e.g. https://pigweed.app) — a one-line env change, no code.
+// (e.g. https://ourlittlefarm.club) — a one-line env change, no code.
 export function allowedOrigins(): string[] {
   return (process.env.CORS_ORIGIN ?? "http://localhost:5173")
     .split(",")
     .map((o) => o.trim())
     .filter(Boolean);
+}
+
+// ─── Passkey / WebAuthn config ─────────────────────────────────────
+// rpID is the DNS effective-domain the browser binds passkeys to: it
+// MUST match the FE host exactly (no scheme, no port) — `localhost`
+// in dev, `ourlittlefarm.club` in prod. rpName is the human-readable
+// label browsers show in the credential prompt. `origin` is the full
+// scheme+host(+port) of the FE, used for origin checks in the BA
+// passkey plugin's verification step.
+export function passkeyRpId(): string {
+  return process.env.PASSKEY_RP_ID ?? "localhost";
+}
+
+export function passkeyRpName(): string {
+  return process.env.PASSKEY_RP_NAME ?? "pigweed";
+}
+
+export function passkeyOrigin(): string {
+  return process.env.PASSKEY_ORIGIN ?? "http://localhost:5173";
 }

@@ -42,6 +42,14 @@ export type MediaKind = z.infer<typeof MediaKind>;
 export const Sort = z.enum(['newest', 'rank']);
 export type Sort = z.infer<typeof Sort>;
 
+/** UI/email locale. pigweed launches with English + Korean; expansion is
+ *  additive. The BE resolves the active locale from the Accept-Language
+ *  header per request (see src/utils/i18n.ts); the FE picks it via a
+ *  Paraglide cookie + Accept-Language fallback. Both ends import the
+ *  enum from this contract so they cannot drift. */
+export const Locale = z.enum(['en', 'ko']);
+export type Locale = z.infer<typeof Locale>;
+
 /* ─── Shared sub-shapes ───────────────────────────────────────────── */
 
 /** Embedded author. `null` on a deleted comment. */

@@ -1,9 +1,15 @@
 import { betterAuth } from "better-auth";
 import { username, emailOTP } from "better-auth/plugins";
+import { passkey } from "@better-auth/passkey";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { prisma } from "./db";
 import { rollIdentity } from "./identity";
-import { allowedOrigins } from "./env";
+import {
+    allowedOrigins,
+    passkeyRpId,
+    passkeyRpName,
+    passkeyOrigin,
+} from "./env";
 
 const c = (color: string, msg: string) => `\x1b[${color}m${msg}\x1b[0m`;
 
@@ -49,6 +55,22 @@ export const auth = betterAuth({
             minUsernameLength: 3,
             maxUsernameLength: 30,
         }),
+        // WebAuthn / passkeys via @better-auth/passkey. Backed by the `Passkey`
+        // model in schema.prisma (shape locked by the plugin — don't add fields
+        // it doesn't know about). Exposes /api/auth/passkey/* endpoints:
+        //   - POST /passkey/add-passkey            (signed-in user adds a passkey)
+        //   - POST /sign-in/passkey                (passwordless sign-in)
+        //   - GET  /passkey/list-user-passkeys
+        //   - POST /passkey/delete-passkey
+        //   - POST /passkey/update-passkey
+        // rpID/rpName/origin come from env (see utils/env.ts) — dev defaults
+        // to localhost; prod uses PASSKEY_RP_ID=ourlittlefarm.club and the
+        // matching PASSKEY_ORIGIN=https://ourlittlefarm.club.
+        passkey({
+            rpID: passkeyRpId(),
+            rpName: passkeyRpName(),
+            origin: passkeyOrigin(),
+        }),
         // 6-digit OTP via email for email verification + password reset + sign-in.
         // The sendVerificationOTP callback is where the email actually goes out.
         // In dev we console.log so you can copy the code from the terminal.
@@ -61,7 +83,7 @@ export const auth = betterAuth({
                 );
                 // TODO(prod): replace with real email send. Example with Resend:
                 //   await resend.emails.send({
-                //     from: "no-reply@pigweed.app",
+                //     from: "no-reply@ourlittlefarm.club",
                 //     to: email,
                 //     subject: `pigweed verification code: ${otp}`,
                 //     html: `Your code is <b>${otp}</b>. Expires in 10 min.`,

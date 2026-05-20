@@ -3,6 +3,7 @@ import { logger } from 'hono/logger'
 import { cors } from 'hono/cors'
 import { allowedOrigins } from './utils/env'
 import { auth } from './utils/auth'
+import { i18nMiddleware } from './middleware/i18n'
 import { coins } from './routes/coins'
 import { stripeWebhook } from './routes/stripe-webhook'
 import { posts } from './routes/posts'
@@ -31,6 +32,11 @@ app.use(
     credentials: true,
   }),
 )
+
+// Locale resolution runs on every request. Parses Accept-Language and
+// stashes the result on c.get("locale"). Handlers that surface user-
+// facing strings call t(locale, key) from utils/i18n.
+app.use('*', i18nMiddleware)
 
 app.get('/', (c) => {
   return c.text('Hello Bitch ass!')
