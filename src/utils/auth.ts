@@ -85,7 +85,7 @@ export const auth = betterAuth({
                 //   await resend.emails.send({
                 //     from: "no-reply@ourlittlefarm.club",
                 //     to: email,
-                //     subject: `pigweed verification code: ${otp}`,
+                //     subject: `ourlittlefarm verification code: ${otp}`,
                 //     html: `Your code is <b>${otp}</b>. Expires in 10 min.`,
                 //   });
             },

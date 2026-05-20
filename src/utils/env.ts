@@ -33,7 +33,11 @@ export function passkeyRpId(): string {
 }
 
 export function passkeyRpName(): string {
-  return process.env.PASSKEY_RP_NAME ?? "pigweed";
+  // Default is the PUBLIC brand ("ourlittlefarm"), not the internal
+  // codename ("pigweed"), because this string surfaces in the OS
+  // credential prompt ("Use a passkey for <PASSKEY_RP_NAME>?") even in
+  // local dev. See memory: brand-pigweed-internal-ourlittlefarm-public.
+  return process.env.PASSKEY_RP_NAME ?? "ourlittlefarm";
 }
 
 export function passkeyOrigin(): string {
