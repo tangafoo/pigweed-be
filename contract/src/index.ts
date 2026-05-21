@@ -53,10 +53,20 @@ export type Locale = z.infer<typeof Locale>;
 /* ─── Shared sub-shapes ───────────────────────────────────────────── */
 
 /** Embedded author. `null` on a deleted comment. */
+/**
+ * The author identity embedded in every post/comment. Carries the
+ * procedural-avatar inputs (`animal` + `avatarSeed`, varied by `gender`)
+ * so feed cards can draw the avatar inline without a second fetch.
+ * Better Auth's legacy `name`/`image` are intentionally NOT here — the
+ * farm identity is the username + procedural avatar.
+ */
 export const Author = z.object({
 	id: z.string(),
-	name: z.string(),
-	image: z.string().nullable()
+	/** Pigweed handle — Better Auth's normalized `username`. */
+	username: z.string(),
+	gender: Gender,
+	animal: Animal,
+	avatarSeed: z.number().int()
 });
 export type Author = z.infer<typeof Author>;
 
@@ -99,7 +109,6 @@ export const SessionUser = z.object({
 	name: z.string(),
 	email: z.string(),
 	emailVerified: z.boolean(),
-	image: z.string().nullable(),
 	username: z.string(),
 	gender: Gender,
 	animal: Animal,
@@ -120,6 +129,29 @@ export const UserCount = z.object({
 	count: z.number().int().nonnegative()
 });
 export type UserCount = z.infer<typeof UserCount>;
+
+/**
+ * GET /users/:userId — public-facing profile. The identity card the FE
+ * renders when you tap an author from a post/comment. Carries everything
+ * needed to draw the procedural avatar (`animal` + `avatarSeed`, varied by
+ * `gender`) plus account-age and activity counts. Deliberately omits
+ * private fields (email, coin balances) — those live on SessionUser only.
+ */
+export const PublicProfile = z.object({
+	id: z.string(),
+	/** Pigweed handle — Better Auth's normalized `username`. */
+	username: z.string(),
+	gender: Gender,
+	animal: Animal,
+	avatarSeed: z.number().int(),
+	/** ISO timestamp — FE renders "hatched X days ago". */
+	createdAt: z.string(),
+	/** Non-deleted posts authored. */
+	postCount: z.number().int().nonnegative(),
+	/** Non-deleted comments authored. */
+	commentCount: z.number().int().nonnegative()
+});
+export type PublicProfile = z.infer<typeof PublicProfile>;
 
 /* ─── Posts ───────────────────────────────────────────────────────── */
 
@@ -189,6 +221,68 @@ export const VoteResponse = z.object({
 	myVote: VoteValue.nullable()
 });
 export type VoteResponse = z.infer<typeof VoteResponse>;
+
+/**
+ * One row of a user's post-vote history. `postId` is the deep-link
+ * target — the FE opens the post straight from it. The embedded `post`
+ * carries title/body so the history list renders an inline preview
+ * without a second fetch. A post soft-deleted after the vote was cast is
+ * redacted: `deletedAt` is non-null, `title`/`body` are `"[deleted]"`,
+ * and `author` is null.
+ */
+export const PostVoteEntry = z.object({
+	value: VoteValue,
+	postId: z.string(),
+	createdAt: z.string(),
+	post: z.object({
+		title: z.string(),
+		body: z.string(),
+		createdAt: z.string(),
+		updatedAt: z.string(),
+		upvoteCount: z.number().int(),
+		downvoteCount: z.number().int(),
+		/** Non-null once the post is soft-deleted — the row is then redacted. */
+		deletedAt: z.string().nullable(),
+		author: Author.nullable()
+	})
+});
+export type PostVoteEntry = z.infer<typeof PostVoteEntry>;
+
+/**
+ * One row of a user's comment-vote history. `commentId` anchors the
+ * comment; `comment.post.id` is the parent post the FE must open to
+ * reach it. `body` is supplied for an inline preview (comments have no
+ * title). A comment soft-deleted after the vote was cast is redacted:
+ * `deletedAt` is non-null, `body` is `"[deleted]"`, and `author` is null.
+ */
+export const CommentVoteEntry = z.object({
+	value: VoteValue,
+	commentId: z.string(),
+	createdAt: z.string(),
+	comment: z.object({
+		body: z.string(),
+		upvoteCount: z.number().int(),
+		downvoteCount: z.number().int(),
+		/** Non-null once the comment is soft-deleted — the row is then redacted. */
+		deletedAt: z.string().nullable(),
+		post: z.object({ id: z.string() }),
+		author: Author.nullable()
+	})
+});
+export type CommentVoteEntry = z.infer<typeof CommentVoteEntry>;
+
+/**
+ * GET /users/:userId/votes — a user's public vote history. `?target=posts`
+ * returns only `postVotes`; `?target=comments` only `commentVotes`; with no
+ * target, both arrays are present. Hence each array is optional.
+ */
+export const UserVotesResponse = z.object({
+	postVotes: z.array(PostVoteEntry).optional(),
+	commentVotes: z.array(CommentVoteEntry).optional(),
+	page: z.number().int(),
+	limit: z.number().int()
+});
+export type UserVotesResponse = z.infer<typeof UserVotesResponse>;
 
 export const CoinBalance = z.object({
 	balance: z.number().int(),

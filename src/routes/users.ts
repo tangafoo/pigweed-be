@@ -20,11 +20,75 @@ users.get("/count", async (c) => {
     return c.json({ count });
 });
 
+// ─────────────────────────────────────────────────────────────
+// GET /users/:userId
+// Public-facing profile — the identity card the FE renders when
+// you tap a post/comment author. Carries the procedural-avatar
+// inputs (animal + avatarSeed, varied by gender), account age,
+// and activity counts. Private fields (email, coin balances) are
+// deliberately NOT exposed — those belong to the owner's session.
+// Registered after `/count` so the static path isn't shadowed by
+// this `:userId` param route.
+// ─────────────────────────────────────────────────────────────
+
+users.get("/:userId", async (c) => {
+    const userId = c.req.param("userId");
+
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+            id: true,
+            username: true,
+            gender: true,
+            animal: true,
+            avatarSeed: true,
+            createdAt: true,
+            // Filtered relation counts — soft-deleted rows must not
+            // inflate a public profile's activity stats.
+            _count: {
+                select: {
+                    posts: { where: { deletedAt: null } },
+                    comments: { where: { deletedAt: null } },
+                },
+            },
+        },
+    });
+
+    if (!user) return c.json({ error: "user not found" }, 404);
+
+    return c.json({
+        id: user.id,
+        username: user.username,
+        gender: user.gender,
+        animal: user.animal,
+        avatarSeed: user.avatarSeed,
+        createdAt: user.createdAt.toISOString(),
+        postCount: user._count.posts,
+        commentCount: user._count.comments,
+    });
+});
+
 // Whitelist of acceptable `?target=` values. Anything else 400s rather than
 // silently returning both arrays — protects against frontend typos like
 // `?target=Post` (capital P) going unnoticed.
 const VALID_TARGETS = ["posts", "comments"] as const;
 type Target = (typeof VALID_TARGETS)[number];
+
+// A vote outlives the content it points at — the post or comment can be
+// soft-deleted after the vote was cast. Mirror the Reddit-style redaction
+// in GET /posts/:id/comments: keep the row (pagination stays stable) but
+// scrub title/body + author so deleted content can't leak out through a
+// third party's public vote history. `author: null` is the deletion
+// signal documented by the contract's nullable `author`.
+function redactPostVote<T extends { post: { deletedAt: Date | null; title: string; body: string; author: unknown } }>(vote: T) {
+    if (!vote.post.deletedAt) return vote;
+    return { ...vote, post: { ...vote.post, title: "[deleted]", body: "[deleted]", author: null } };
+}
+
+function redactCommentVote<T extends { comment: { deletedAt: Date | null; body: string; author: unknown } }>(vote: T) {
+    if (!vote.comment.deletedAt) return vote;
+    return { ...vote, comment: { ...vote.comment, body: "[deleted]", author: null } };
+}
 
 users.get("/:userId/votes", async (c) => {
     const userId = c.req.param("userId");
@@ -58,10 +122,11 @@ users.get("/:userId/votes", async (c) => {
                 comment: {
                     select: {
                         body: true,
+                        deletedAt: true,
                         upvoteCount: true,
                         downvoteCount: true,
                         post: { select: { id: true } },
-                        author: { select: { id: true, name: true, image: true } },
+                        author: { select: { id: true, username: true, gender: true, animal: true, avatarSeed: true } },
                     },
                 },
             },
@@ -79,11 +144,12 @@ users.get("/:userId/votes", async (c) => {
                     select: {
                         title: true,
                         body: true,
+                        deletedAt: true,
                         createdAt: true,
                         updatedAt: true,
                         upvoteCount: true,
                         downvoteCount: true,
-                        author: { select: { id: true, name: true, image: true } },
+                        author: { select: { id: true, username: true, gender: true, animal: true, avatarSeed: true } },
                     },
                 },
             },
@@ -92,9 +158,13 @@ users.get("/:userId/votes", async (c) => {
 
     if (!user) return c.json({ error: "user not found" }, 404);
 
-    if (target === "comments") return c.json({ commentVotes, page, limit });
-    if (target === "posts") return c.json({ postVotes, page, limit });
-    return c.json({ commentVotes, postVotes, page, limit });
+    // Redact any post/comment soft-deleted after its vote was cast.
+    const posts = postVotes.map(redactPostVote);
+    const comments = commentVotes.map(redactCommentVote);
+
+    if (target === "comments") return c.json({ commentVotes: comments, page, limit });
+    if (target === "posts") return c.json({ postVotes: posts, page, limit });
+    return c.json({ commentVotes: comments, postVotes: posts, page, limit });
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -114,7 +184,11 @@ users.get("/:userId/achievements", async (c) => {
             select: {
                 grantedAt: true,
                 achievement: {
-                    select: { id: true, key: true, name: true, description: true, metric: true, threshold: true },
+                    // Matches the contract's `Achievement` shape. `key` and
+                    // `threshold` are internal catalog fields (stable handle +
+                    // earn condition) — not display data, kept off this public
+                    // endpoint. `rewardCoins` is the payout the FE renders.
+                    select: { id: true, name: true, description: true, metric: true, rewardCoins: true },
                 },
             },
         }),

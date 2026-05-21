@@ -149,7 +149,7 @@ const postSelect = {
   upvoteCount: true,
   downvoteCount: true,
   moderated: true,
-  author: { select: { id: true, name: true, image: true } },
+  author: { select: { id: true, username: true, gender: true, animal: true, avatarSeed: true } },
   media: {
     select: { id: true, url: true, kind: true, order: true, width: true, height: true },
     orderBy: { order: "asc" as const },

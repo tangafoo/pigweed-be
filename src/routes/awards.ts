@@ -173,7 +173,7 @@ awards.get("/posts/:postId/awards/granters", requireSignIn, async (c) => {
     select: {
       id: true,
       createdAt: true,
-      granter: { select: { id: true, name: true, image: true } },
+      granter: { select: { id: true, username: true, gender: true, animal: true, avatarSeed: true } },
       awardType: { select: { id: true, assetKey: true, name: true } },
     },
   });
@@ -218,7 +218,7 @@ awards.get("/comments/:commentId/awards/granters", requireSignIn, async (c) => {
     select: {
       id: true,
       createdAt: true,
-      granter: { select: { id: true, name: true, image: true } },
+      granter: { select: { id: true, username: true, gender: true, animal: true, avatarSeed: true } },
       awardType: { select: { id: true, assetKey: true, name: true } },
     },
   });

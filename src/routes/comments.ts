@@ -33,7 +33,7 @@ const commentSelect = {
   upvoteCount: true,
   downvoteCount: true,
   moderated: true,
-  author: { select: { id: true, name: true, image: true } },
+  author: { select: { id: true, username: true, gender: true, animal: true, avatarSeed: true } },
 } as const;
 
 // Reddit-style redaction: deleted rows stay in the list (tree integrity)
