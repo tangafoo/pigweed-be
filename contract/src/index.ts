@@ -178,7 +178,8 @@ export const FeedResponse = z.object({
 	posts: z.array(Post),
 	page: z.number().int(),
 	limit: z.number().int(),
-	radiusKm: z.number(),
+	/** `null` when the viewer sent no lat/lng — the feed is unbounded (all posts, newest-first). */
+	radiusKm: z.number().nullable(),
 	sort: Sort
 });
 export type FeedResponse = z.infer<typeof FeedResponse>;
