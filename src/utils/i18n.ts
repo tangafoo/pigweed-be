@@ -21,9 +21,10 @@
 // same pattern as Animal/Gender (Prisma enum on BE side, Zod enum in the
 // contract). If you add a locale here, add it there too and rebuild the
 // contract (`cd contract && bun run build`).
-export type Locale = "en" | "ko";
+export type Locale = "en" | "ko" | "zh" | "ja";
 
-export const SUPPORTED_LOCALES: readonly Locale[] = ["en", "ko"] as const;
+// `zh` is Traditional Chinese (zh-TW) — kept in lockstep with the FE's zh.json.
+export const SUPPORTED_LOCALES: readonly Locale[] = ["en", "ko", "zh", "ja"] as const;
 export const DEFAULT_LOCALE: Locale = "en";
 
 // ─── Dictionary ────────────────────────────────────────────────────
@@ -51,6 +52,17 @@ const dictionaries: Record<Locale, Dict> = {
         "auth.otp_email_subject": "ourlittlefarm 인증 코드",
         "moderation.rejected_default": "이 콘텐츠는 게시할 수 없습니다.",
         "error.generic": "문제가 발생했습니다. 다시 시도해 주세요.",
+    },
+    // Traditional Chinese (zh-TW).
+    zh: {
+        "auth.otp_email_subject": "您的 ourlittlefarm 驗證碼",
+        "moderation.rejected_default": "此內容無法發佈。",
+        "error.generic": "發生錯誤，請再試一次。",
+    },
+    ja: {
+        "auth.otp_email_subject": "ourlittlefarm の確認コード",
+        "moderation.rejected_default": "このコンテンツは投稿できません。",
+        "error.generic": "エラーが発生しました。もう一度お試しください。",
     },
 };
 

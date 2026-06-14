@@ -55,7 +55,7 @@ export type PostCategory = z.infer<typeof PostCategory>;
  *  header per request (see src/utils/i18n.ts); the FE picks it via a
  *  Paraglide cookie + Accept-Language fallback. Both ends import the
  *  enum from this contract so they cannot drift. */
-export const Locale = z.enum(['en', 'ko']);
+export const Locale = z.enum(['en', 'ko', 'zh', 'ja']);
 export type Locale = z.infer<typeof Locale>;
 
 /* ─── Shared sub-shapes ───────────────────────────────────────────── */
