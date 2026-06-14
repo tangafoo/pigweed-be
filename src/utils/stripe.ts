@@ -1,8 +1,7 @@
 import Stripe from "stripe";
+import { stripeSecretKey, stripeWebhookSecret as readWebhookSecret } from "./env";
 
-const secret = process.env.STRIPE_SECRET_KEY;
-if (!secret) throw new Error("STRIPE_SECRET_KEY is not set");
+// env.ts validates STRIPE_SECRET_KEY is present at boot, so no guard here.
+export const stripe = new Stripe(stripeSecretKey());
 
-export const stripe = new Stripe(secret);
-
-export const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET ?? "";
+export const stripeWebhookSecret = readWebhookSecret();

@@ -11,6 +11,8 @@
 // network blips, we ALLOW the content and log it. A third-party outage
 // must never stop pigweed from working. Moderation is best-effort.
 
+import { openaiApiKey } from "../env";
+
 // OpenAI returns 13 categories. These are the ones we reject on. The
 // rest (plain `harassment`, non-minor `sexual`, non-graphic `violence`,
 // profanity) are allowed — that's the spice.
@@ -53,7 +55,7 @@ export type ModerationResult =
   | { allowed: false; categories: string[]; reason: string };
 
 export async function moderate(text: string): Promise<ModerationResult> {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = openaiApiKey();
 
   // Fail-open #1: no key configured. Moderation effectively disabled.
   if (!apiKey) {

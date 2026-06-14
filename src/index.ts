@@ -11,6 +11,7 @@ import { comments } from './routes/comments'
 import { votes } from './routes/votes'
 import { users } from './routes/users'
 import { awards } from './routes/awards'
+import { media } from './routes/media'
 import { registerAchievementListeners } from './utils/achievements'
 
 // Wire the achievement engine to the event bus at startup. After this
@@ -51,6 +52,7 @@ app.route('/', comments)
 app.route('/', votes)
 app.route('/users', users)
 app.route('/', awards)
+app.route('/media', media)
 
 export default {
   port: 3000,

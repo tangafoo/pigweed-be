@@ -6,6 +6,7 @@ import { bus } from "../events/bus";
 import { isValidLatLng, DEFAULT_RADIUS_KM } from "../utils/geo";
 import { RANKING_WEIGHTS } from "../utils/ranking";
 import { moderate } from "../utils/ai/moderator";
+import { r2Config } from "../utils/env";
 import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
 import { optionalSignIn, type ViewerVars } from "../middleware/optional-sign-in";
 
@@ -35,11 +36,32 @@ function isValidUrl(s: string): boolean {
 
 // Returns parsed media OR a string error message. Discriminated union
 // would be tidier but this is small enough that "string = error" works.
-export function parseMedia(input: unknown): MediaInput[] | { error: string } {
+//
+// `allowedBaseUrl` (optional): when provided, every media URL must be
+// hosted on that origin — this is how we ensure posts only embed media we
+// actually uploaded to our own R2 bucket, not arbitrary third-party URLs.
+// The route passes r2Config()?.publicBaseUrl; when it's undefined (R2 not
+// configured, or in unit tests) enforcement is skipped and any valid URL
+// is accepted, preserving the original permissive behavior.
+export function parseMedia(
+  input: unknown,
+  allowedBaseUrl?: string,
+): MediaInput[] | { error: string } {
   if (input == null) return [];
   if (!Array.isArray(input)) return { error: "media must be an array" };
   if (input.length > MAX_MEDIA_PER_POST) {
     return { error: `media cannot exceed ${MAX_MEDIA_PER_POST} items` };
+  }
+
+  // Compare by ORIGIN, not string prefix — `startsWith` would let
+  // `https://media.ourlittlefarm.club.evil.com/...` through. Parsed once.
+  let allowedOrigin: string | null = null;
+  if (allowedBaseUrl) {
+    try {
+      allowedOrigin = new URL(allowedBaseUrl).origin;
+    } catch {
+      allowedOrigin = null; // misconfigured base ⇒ don't enforce (fail open)
+    }
   }
 
   const out: MediaInput[] = [];
@@ -47,6 +69,9 @@ export function parseMedia(input: unknown): MediaInput[] | { error: string } {
     const m = input[i];
     if (typeof m?.url !== "string" || !isValidUrl(m.url)) {
       return { error: `media[${i}].url must be a valid URL` };
+    }
+    if (allowedOrigin && new URL(m.url).origin !== allowedOrigin) {
+      return { error: `media[${i}].url must be hosted on the app's media domain` };
     }
     if (typeof m?.kind !== "string" || !VALID_MEDIA_KINDS.includes(m.kind as never)) {
       return { error: `media[${i}].kind must be one of ${VALID_MEDIA_KINDS.join(", ")}` };
@@ -321,7 +346,9 @@ posts.post("/", requireSignIn, async (c) => {
   const latitude = body.latitude;
   const longitude = body.longitude;
 
-  const mediaResult = parseMedia(body?.media);
+  // Enforce that embedded media lives on our own R2 domain (when R2 is
+  // configured). Prevents posts from hot-linking arbitrary external URLs.
+  const mediaResult = parseMedia(body?.media, r2Config()?.publicBaseUrl);
   if (!Array.isArray(mediaResult)) return c.json(mediaResult, 400);
 
   // Moderation gate — title + body checked together. Fail-open inside

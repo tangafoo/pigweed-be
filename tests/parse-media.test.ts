@@ -84,4 +84,39 @@ describe("parseMedia", () => {
     ]);
     expect(Array.isArray(result)).toBe(true);
   });
+
+  describe("allowedBaseUrl enforcement", () => {
+    const BASE = "https://media.ourlittlefarm.club";
+
+    it("accepts URLs hosted on the allowed origin", () => {
+      const result = parseMedia(
+        [{ url: `${BASE}/media/u1/pm_abc.webp`, kind: "image" }],
+        BASE,
+      );
+      expect(Array.isArray(result)).toBe(true);
+    });
+
+    it("rejects URLs on a different origin", () => {
+      const result = parseMedia(
+        [{ url: "https://example.com/a.jpg", kind: "image" }],
+        BASE,
+      );
+      expect(result).toEqual({
+        error: "media[0].url must be hosted on the app's media domain",
+      });
+    });
+
+    it("rejects look-alike domains (origin compare, not prefix)", () => {
+      const result = parseMedia(
+        [{ url: "https://media.ourlittlefarm.club.evil.com/a.jpg", kind: "image" }],
+        BASE,
+      );
+      expect(Array.isArray(result)).toBe(false);
+    });
+
+    it("stays permissive when no base is provided", () => {
+      const result = parseMedia([{ url: "https://example.com/a.jpg", kind: "image" }]);
+      expect(Array.isArray(result)).toBe(true);
+    });
+  });
 });

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { prisma } from "../utils/db";
 import { makeId, ID_PREFIX } from "../utils/ids";
 import { stripe } from "../utils/stripe";
+import { betterAuthUrl } from "../utils/env";
 import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
 
 export const coins = new Hono<AuthVars>();
@@ -53,7 +54,7 @@ coins.post("/checkout", requireSignIn, async (c) => {
     },
   });
 
-  const baseUrl = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
+  const baseUrl = betterAuthUrl();
   const checkout = await stripe.checkout.sessions.create({
     mode: "payment",
     line_items: [{ price: pack.stripePriceId, quantity: 1 }],
