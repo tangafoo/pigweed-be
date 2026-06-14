@@ -57,4 +57,10 @@ app.route('/media', media)
 export default {
   port: 3000,
   fetch: app.fetch,
+  // SSE (`GET /users/me/events`) holds a long-lived connection kept warm by a
+  // 25s heartbeat. Bun's default socket idleTimeout is 10s, which would cut
+  // the stream before each heartbeat (ERR_INCOMPLETE_CHUNKED_ENCODING → the
+  // browser EventSource reconnects in a loop). Raise it above the heartbeat;
+  // 255s is Bun's max.
+  idleTimeout: 120,
 }

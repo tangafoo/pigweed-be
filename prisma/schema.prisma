@@ -37,6 +37,19 @@ enum Gender {
   @@map("gender")
 }
 
+// Produce section a post belongs to — backs the /posts page sections.
+// Nullable on Post: owner "farm update" posts and general chatter carry
+// no category. Adding a value later is a migration (acceptable — the
+// produce lineup changes rarely).
+enum PostCategory {
+  EGGS
+  VEGGIES
+  FRUITS
+  ANIMALS
+
+  @@map("post_category")
+}
+
 // ─────────────────────────────────────────────────────────────
 // AUTH — managed by Better Auth. Do not rename fields without
 // also updating better-auth config; the library maps to these.
@@ -59,6 +72,11 @@ model User {
   gender             Gender
   animal             Animal
   avatarSeed         Int // feeds deterministic FE color/pattern math
+  // ourlittlefarm owner flag — owners' posts get a Reddit-style "OP" badge
+  // so visitors can tell owner updates (farm pics/news) from customer
+  // reviews. Default false; flipped manually (Studio/SQL) for the handful
+  // of real owners. Surfaced read-only on the embedded post/comment author.
+  isFarmOwner        Boolean                 @default(false)
   // Note: pigweed does NOT store user current geo. The FE knows where
   // the user is (browser geolocation API) and sends lat/lng on each
   // request that needs it (post creation, feed query). Privacy-cleaner;
@@ -226,6 +244,12 @@ model Post {
   // unjudged (fail-open). The FE renders these with an UNMODERATED badge —
   // rare-by-nature collectibles, can't be farmed. true = OpenAI judged it.
   moderated     Boolean                                @default(true)
+  // Produce section (eggs/veggies/fruits) or null for uncategorized
+  // owner updates / chatter. Indexed for the /posts section filters.
+  category      PostCategory?
+  // Customer review rating 1–5, or null when the post isn't a review.
+  // App-validated to 1..5 (no DB check constraint — kept simple).
+  rating        Int?
   // PostGIS generated column. Postgres maintains it automatically from
   // latitude/longitude — every insert/update recomputes it, no app code.
   // Prisma can't express `GENERATED ALWAYS AS`, so:
@@ -244,6 +268,7 @@ model Post {
 
   @@index([authorId])
   @@index([createdAt])
+  @@index([category])
   // Prisma-managed GIST index — declared here so Prisma creates it AND
   // never tries to drop it (this was a big source of the earlier pain).
   @@index([geo], type: Gist)

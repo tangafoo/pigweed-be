@@ -42,6 +42,14 @@ export type MediaKind = z.infer<typeof MediaKind>;
 export const Sort = z.enum(['newest', 'rank']);
 export type Sort = z.infer<typeof Sort>;
 
+/**
+ * Produce category a post belongs to — backs the /posts page sections
+ * (eggs / veggies / fruits). Nullable on a post: owner "farm update" posts
+ * and other general chatter carry no category and live in the "all" bucket.
+ */
+export const PostCategory = z.enum(['EGGS', 'VEGGIES', 'FRUITS', 'ANIMALS']);
+export type PostCategory = z.infer<typeof PostCategory>;
+
 /** UI/email locale. pigweed launches with English + Korean; expansion is
  *  additive. The BE resolves the active locale from the Accept-Language
  *  header per request (see src/utils/i18n.ts); the FE picks it via a
@@ -66,7 +74,14 @@ export const Author = z.object({
 	username: z.string(),
 	gender: Gender,
 	animal: Animal,
-	avatarSeed: z.number().int()
+	avatarSeed: z.number().int(),
+	/**
+	 * True when this author is an ourlittlefarm owner — the FE renders a
+	 * Reddit-style "OP" badge so visitors can tell owner updates from
+	 * customer reviews. Server-derived from `User.isFarmOwner`; never a
+	 * client-supplied value.
+	 */
+	isFarmOwner: z.boolean()
 });
 export type Author = z.infer<typeof Author>;
 
@@ -166,6 +181,10 @@ export const Post = z.object({
 	upvoteCount: z.number().int(),
 	downvoteCount: z.number().int(),
 	moderated: z.boolean(),
+	/** Produce section, or `null` for uncategorized (owner updates / chatter). */
+	category: PostCategory.nullable(),
+	/** Customer star rating 1–5; `null` when the post isn't a review. */
+	rating: z.number().int().min(1).max(5).nullable(),
 	author: Author,
 	media: z.array(Media),
 	/** The signed-in viewer's vote on this post. */
@@ -329,6 +348,10 @@ export const PostInput = z.object({
 	body: z.string().max(BODY_MAX),
 	latitude: z.number(),
 	longitude: z.number(),
+	/** Optional produce section (owner updates may omit it). */
+	category: PostCategory.optional(),
+	/** Optional 1–5 star review rating (owner updates omit it). */
+	rating: z.number().int().min(1).max(5).optional(),
 	media: z.array(MediaInput).max(MAX_MEDIA_PER_POST).optional()
 });
 export type PostInput = z.infer<typeof PostInput>;
@@ -336,11 +359,19 @@ export type PostInput = z.infer<typeof PostInput>;
 export const PostPatchInput = z
 	.object({
 		title: z.string().min(1).max(TITLE_MAX).optional(),
-		body: z.string().max(BODY_MAX).optional()
+		body: z.string().max(BODY_MAX).optional(),
+		/** Pass `null` to clear the category, a value to set it, or omit to leave it. */
+		category: PostCategory.nullable().optional(),
+		rating: z.number().int().min(1).max(5).nullable().optional()
 	})
-	.refine((v) => v.title !== undefined || v.body !== undefined, {
-		message: 'provide at least one of title, body'
-	});
+	.refine(
+		(v) =>
+			v.title !== undefined ||
+			v.body !== undefined ||
+			v.category !== undefined ||
+			v.rating !== undefined,
+		{ message: 'provide at least one of title, body, category, rating' }
+	);
 export type PostPatchInput = z.infer<typeof PostPatchInput>;
 
 export const CommentInput = z.object({

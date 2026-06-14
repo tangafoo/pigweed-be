@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { prisma } from "../utils/db";
-import { VoteValue } from "../generated/prisma/client";
+import { VoteValue, Prisma, PostCategory } from "../generated/prisma/client";
 import { makeId, ID_PREFIX } from "../utils/ids";
 import { bus } from "../events/bus";
 import { isValidLatLng, DEFAULT_RADIUS_KM } from "../utils/geo";
@@ -16,6 +16,15 @@ const VALID_MEDIA_KINDS = ["image", "video", "gif"] as const;
 const MAX_MEDIA_PER_POST = 10;
 const TITLE_MAX = 200;
 const BODY_MAX = 10000;
+// Derived from the generated Prisma enum so it can never drift from the
+// schema — add a value in schema.prisma + regenerate and this list follows
+// automatically (no hand-maintained copy). Posts may carry one category or
+// none (owner updates / general chatter live in the "all" bucket).
+const VALID_CATEGORIES = Object.values(PostCategory);
+
+function isPostCategory(v: unknown): v is PostCategory {
+  return typeof v === "string" && (VALID_CATEGORIES as string[]).includes(v);
+}
 
 type MediaInput = {
   url: string;
@@ -174,7 +183,18 @@ const postSelect = {
   upvoteCount: true,
   downvoteCount: true,
   moderated: true,
-  author: { select: { id: true, username: true, gender: true, animal: true, avatarSeed: true } },
+  category: true,
+  rating: true,
+  author: {
+    select: {
+      id: true,
+      username: true,
+      gender: true,
+      animal: true,
+      avatarSeed: true,
+      isFarmOwner: true,
+    },
+  },
   media: {
     select: { id: true, url: true, kind: true, order: true, width: true, height: true },
     orderBy: { order: "asc" as const },
@@ -196,6 +216,28 @@ posts.get("/", optionalSignIn, async (c) => {
   const radiusKm = Number.isFinite(Number(radiusStr)) && Number(radiusStr) > 0
     ? Number(radiusStr)
     : DEFAULT_RADIUS_KM;
+
+  // Content filters (all optional, all combine). `authorId` powers the
+  // profile "posts" tab; `category` + `minRating` power the /posts page
+  // section + star filters. Invalid values are ignored (treated as absent).
+  const authorId = c.req.query("authorId") || undefined;
+  const categoryParam = c.req.query("category");
+  const category = isPostCategory(categoryParam) ? categoryParam : undefined;
+  const minRatingNum = Number(c.req.query("minRating"));
+  const minRating =
+    Number.isInteger(minRatingNum) && minRatingNum >= 1 && minRatingNum <= 5
+      ? minRatingNum
+      : undefined;
+
+  // Built once, applied to both code paths: a Prisma `where` object for the
+  // findMany branch, and matching raw-SQL `AND` fragments for the geo branch.
+  // Columns are unqualified — they're unambiguous (only `post` has them) in
+  // both the single-table newest query and the post⋈user rank query.
+  const filterFragments: Prisma.Sql[] = [];
+  if (authorId) filterFragments.push(Prisma.sql`AND "authorId" = ${authorId}`);
+  if (category) filterFragments.push(Prisma.sql`AND "category" = ${category}::"post_category"`);
+  if (minRating != null) filterFragments.push(Prisma.sql`AND "rating" >= ${minRating}`);
+  const filterSql = filterFragments.length ? Prisma.join(filterFragments, " ") : Prisma.empty;
 
   // Sort mode. ?sort=rank → composite score (the "hot" feed). Anything
   // else → newest first. Ranking REQUIRES geo (the formula has a
@@ -241,6 +283,7 @@ posts.get("/", optionalSignIn, async (c) => {
               ST_SetSRID(ST_MakePoint(${viewerLocation.longitude}, ${viewerLocation.latitude}), 4326)::geography,
               ${radiusKm * 1000}
             )
+            ${filterSql}
           ORDER BY (
             -${RANKING_WEIGHTS.geoPerKm} * (
               ST_Distance(post.geo, ST_SetSRID(ST_MakePoint(${viewerLocation.longitude}, ${viewerLocation.latitude}), 4326)::geography) / 1000.0
@@ -259,6 +302,7 @@ posts.get("/", optionalSignIn, async (c) => {
               ST_SetSRID(ST_MakePoint(${viewerLocation.longitude}, ${viewerLocation.latitude}), 4326)::geography,
               ${radiusKm * 1000}
             )
+            ${filterSql}
           ORDER BY "createdAt" DESC
           LIMIT ${limit} OFFSET ${offset}
         `;
@@ -274,7 +318,12 @@ posts.get("/", optionalSignIn, async (c) => {
     rows = ids.map((id) => byId.get(id)).filter((p): p is NonNullable<typeof p> => p != null);
   } else {
     rows = await prisma.post.findMany({
-      where: { deletedAt: null },
+      where: {
+        deletedAt: null,
+        ...(authorId ? { authorId } : {}),
+        ...(category ? { category } : {}),
+        ...(minRating != null ? { rating: { gte: minRating } } : {}),
+      },
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * limit,
       take: limit,
@@ -346,6 +395,25 @@ posts.post("/", requireSignIn, async (c) => {
   const latitude = body.latitude;
   const longitude = body.longitude;
 
+  // Optional produce category. Omit/null → uncategorized; any other value
+  // must be a known PostCategory.
+  let category: PostCategory | null = null;
+  if (body?.category != null) {
+    if (!isPostCategory(body.category)) {
+      return c.json({ error: `category must be one of ${VALID_CATEGORIES.join(", ")}` }, 400);
+    }
+    category = body.category;
+  }
+
+  // Optional 1–5 review rating. Omit/null → not a review.
+  let rating: number | null = null;
+  if (body?.rating != null) {
+    if (!Number.isInteger(body.rating) || body.rating < 1 || body.rating > 5) {
+      return c.json({ error: "rating must be an integer 1-5" }, 400);
+    }
+    rating = body.rating;
+  }
+
   // Enforce that embedded media lives on our own R2 domain (when R2 is
   // configured). Prevents posts from hot-linking arbitrary external URLs.
   const mediaResult = parseMedia(body?.media, r2Config()?.publicBaseUrl);
@@ -369,6 +437,8 @@ posts.post("/", requireSignIn, async (c) => {
       body: content,
       latitude,
       longitude,
+      category,
+      rating,
       moderated: mod.moderated,
       media: mediaResult.length > 0
         ? {
@@ -399,7 +469,12 @@ posts.patch("/:id", requireSignIn, async (c) => {
   if (!existing) return c.json({ error: "post not found" }, 404);
   if (existing.authorId !== userId) return c.json({ error: "not your post" }, 403);
 
-  const updates: { title?: string; body?: string } = {};
+  const updates: {
+    title?: string;
+    body?: string;
+    category?: PostCategory | null;
+    rating?: number | null;
+  } = {};
   if (typeof body?.title === "string") {
     const t = body.title.trim();
     if (t.length === 0 || t.length > TITLE_MAX) {
@@ -413,6 +488,22 @@ posts.patch("/:id", requireSignIn, async (c) => {
       return c.json({ error: `body must be 1-${BODY_MAX} chars` }, 400);
     }
     updates.body = b;
+  }
+  // category/rating: `null` clears, a valid value sets, `undefined` (absent) leaves.
+  if (body?.category !== undefined) {
+    if (body.category !== null && !isPostCategory(body.category)) {
+      return c.json({ error: `category must be one of ${VALID_CATEGORIES.join(", ")}` }, 400);
+    }
+    updates.category = body.category;
+  }
+  if (body?.rating !== undefined) {
+    if (
+      body.rating !== null &&
+      (!Number.isInteger(body.rating) || body.rating < 1 || body.rating > 5)
+    ) {
+      return c.json({ error: "rating must be an integer 1-5" }, 400);
+    }
+    updates.rating = body.rating;
   }
   if (Object.keys(updates).length === 0) {
     return c.json({ error: "no fields to update" }, 400);
