@@ -147,8 +147,9 @@ comments.post("/posts/:postId/comments", requireSignIn, async (c) => {
 
   const mod = await moderate(text);
   if (!mod.allowed) {
+    console.log(`[comments] blocked comment by ${userId} on ${postId} — flagged: ${mod.categories.join(", ")}`);
     return c.json(
-      { error: `flagged for ${mod.reason}`, code: "CONTENT_FLAGGED", categories: mod.categories },
+      { error: `flagged for ${mod.reason}`, code: "CONTENT_FLAGGED", rejectedCategories: mod.categories },
       422,
     );
   }
@@ -159,6 +160,10 @@ comments.post("/posts/:postId/comments", requireSignIn, async (c) => {
   });
 
   bus.emit({ type: "comment_created", userId });
+
+  console.log(
+    `[comments] created ${comment.id} on ${postId} by ${userId}${parentCommentId ? ` (reply to ${parentCommentId}, depth ${depth})` : ""}`,
+  );
 
   return c.json({ comment }, 201);
 });

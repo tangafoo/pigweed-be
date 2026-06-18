@@ -55,7 +55,9 @@ app.route('/', awards)
 app.route('/media', media)
 
 export default {
-  port: 3000,
+  // Railway (and most PaaS) inject the port to bind on via $PORT. Fall back
+  // to 3000 for local dev where it's unset.
+  port: Number(process.env.PORT) || 3000,
   fetch: app.fetch,
   // SSE (`GET /users/me/events`) holds a long-lived connection kept warm by a
   // 25s heartbeat. Bun's default socket idleTimeout is 10s, which would cut

@@ -75,6 +75,8 @@ votes.put("/posts/:postId/vote", requireSignIn, async (c) => {
     }),
   ]);
 
+  console.log(`[votes] post ${postId} ${value} by ${userId} → net ${updated.upvoteCount - updated.downvoteCount}`);
+
   return c.json({ ...updated, myVote: value });
 });
 
@@ -109,6 +111,8 @@ votes.delete("/posts/:postId/vote", requireSignIn, async (c) => {
       select: { upvoteCount: true, downvoteCount: true },
     }),
   ]);
+
+  console.log(`[votes] post ${postId} vote cleared by ${userId} → net ${updated.upvoteCount - updated.downvoteCount}`);
 
   return c.json({ ...updated, myVote: null });
 });
@@ -161,6 +165,8 @@ votes.put("/comments/:commentId/vote", requireSignIn, async (c) => {
     }),
   ]);
 
+  console.log(`[votes] comment ${commentId} ${value} by ${userId} → net ${updated.upvoteCount - updated.downvoteCount}`);
+
   return c.json({ ...updated, myVote: value });
 });
 
@@ -194,6 +200,8 @@ votes.delete("/comments/:commentId/vote", requireSignIn, async (c) => {
       select: { upvoteCount: true, downvoteCount: true },
     }),
   ]);
+
+  console.log(`[votes] comment ${commentId} vote cleared by ${userId} → net ${updated.upvoteCount - updated.downvoteCount}`);
 
   return c.json({ ...updated, myVote: null });
 });

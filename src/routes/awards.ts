@@ -70,6 +70,8 @@ awards.post("/posts/:postId/awards", requireSignIn, async (c) => {
 
     bus.emit({ type: "award_granted", granterId });
 
+    console.log(`[awards] ${granterId} gifted "${awardType.name}" to post ${postId} (−${awardType.priceCoins} coins)`);
+
     return c.json({ award: awardRow, awardType }, 201);
   } catch (err: any) {
     if (err?.code === "P2025") {
@@ -113,6 +115,8 @@ awards.post("/comments/:commentId/awards", requireSignIn, async (c) => {
     ]);
 
     bus.emit({ type: "award_granted", granterId });
+
+    console.log(`[awards] ${granterId} gifted "${awardType.name}" to comment ${commentId} (−${awardType.priceCoins} coins)`);
 
     return c.json({ award: awardRow, awardType }, 201);
   } catch (err: any) {

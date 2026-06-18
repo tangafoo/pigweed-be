@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { prisma } from "../utils/db";
 import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
 import { makeId, ID_PREFIX } from "../utils/ids";
 import {
@@ -21,6 +22,17 @@ import { isStorageConfigured, putObject } from "../utils/storage";
 // ─────────────────────────────────────────────────────────────
 
 export const media = new Hono<AuthVars>();
+
+// Make an arbitrary string safe + readable as a single S3/R2 key segment:
+// lowercase, only [a-z0-9_-], collapse the rest to "-", trim, length-cap.
+// Returns "" if nothing usable survives (callers supply a fallback).
+function keySegment(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
 
 media.post("/", requireSignIn, async (c) => {
   // No R2 configured → fail loudly rather than half-working.
@@ -64,8 +76,18 @@ media.post("/", requireSignIn, async (c) => {
     return c.json({ error: "Could not process image." }, 422);
   }
 
-  // media/<userId>/<pm_…>.webp — namespaced per user, opaque id.
-  const key = `media/${userId}/${makeId(ID_PREFIX.POST_MEDIA)}.webp`;
+  // Build a human-readable key: media/<username>/<category>/<pm_…>.webp.
+  // Username is the public pseudonym (unique, NOT email — we keep PII out of
+  // storage paths). Category is an optional hint the client sends (it knows
+  // it at submit time); absent/unknown ⇒ "uncategorized". The opaque pm_ id
+  // is kept for collision-safety and unguessable URLs.
+  const username = (
+    await prisma.user.findUnique({ where: { id: userId }, select: { username: true } })
+  )?.username;
+  const userSegment = keySegment(username ?? "") || userId;
+  const categoryRaw = typeof body["category"] === "string" ? body["category"] : "";
+  const categorySegment = keySegment(categoryRaw) || "uncategorized";
+  const key = `media/${userSegment}/${categorySegment}/${makeId(ID_PREFIX.POST_MEDIA)}.webp`;
 
   let url: string;
   try {
@@ -74,6 +96,8 @@ media.post("/", requireSignIn, async (c) => {
     console.error("[media] upload failed:", err);
     return c.json({ error: "Upload failed." }, 502);
   }
+
+  console.log(`[media] uploaded ${key} (${processed.width}x${processed.height}) for ${userId}`);
 
   return c.json({
     url,

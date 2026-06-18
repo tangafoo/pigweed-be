@@ -423,8 +423,9 @@ posts.post("/", requireSignIn, async (c) => {
   // moderate(); a block here means it genuinely tripped a category.
   const mod = await moderate(`${title}\n\n${content}`);
   if (!mod.allowed) {
+    console.log(`[posts] blocked post by ${userId} — flagged: ${mod.categories.join(", ")}`);
     return c.json(
-      { error: `flagged for ${mod.reason}`, code: "CONTENT_FLAGGED", categories: mod.categories },
+      { error: `flagged for ${mod.reason}`, code: "CONTENT_FLAGGED", rejectedCategories: mod.categories },
       422,
     );
   }
@@ -453,6 +454,10 @@ posts.post("/", requireSignIn, async (c) => {
   });
 
   bus.emit({ type: "post_created", userId });
+
+  console.log(
+    `[posts] created ${post.id} by ${userId} (category=${category ?? "none"}, rating=${rating ?? "none"}, media=${mediaResult.length})`,
+  );
 
   return c.json({ post }, 201);
 });

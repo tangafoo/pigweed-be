@@ -91,6 +91,10 @@ async function checkAchievementsForMetric(
         },
         newCoinBalance: updatedUser.coinBalance,
       });
+
+      console.log(
+        `[achievements] unlocked "${a.name}" (${a.key}) for ${userId} — +${a.rewardCoins} coins → balance ${updatedUser.coinBalance}`,
+      );
     } catch (err: any) {
       // P2002 = unique constraint violation = already granted. Expected
       // when a re-trigger fires (e.g., user makes their 101st post after

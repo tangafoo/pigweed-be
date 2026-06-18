@@ -57,5 +57,9 @@ async function handleCheckoutCompleted(event: Stripe.Event) {
       where: { id: purchase.userId },
       data: { coinBalance: { increment: purchase.coinsGranted } },
     });
+
+    console.log(
+      `[stripe-webhook] credited ${purchase.coinsGranted} coins to ${purchase.userId} (purchase ${purchase.id}, evt ${event.id})`,
+    );
   });
 }

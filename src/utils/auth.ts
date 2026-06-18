@@ -111,6 +111,7 @@ export const auth = betterAuth({
             create: {
                 before: async (user) => {
                     const { animal, avatarSeed } = rollIdentity();
+                    console.log(`[auth] signup ${user.username} — rolled ${animal} (seed ${avatarSeed})`);
                     // pigweed has no separate "display name" concept — the handle
                     // IS the identity. Force displayUsername to mirror username so
                     // they can never drift apart. Better Auth's plugin would

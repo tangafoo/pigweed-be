@@ -1,6 +1,7 @@
 # pigweed
 
-A backend for an anonymous, hyperlocal, animal-themed social network.
+A backend for a hyperlocal, animal-themed social network — a farm community
+(owner updates + customer reviews) with an optional animal pseudonym.
 
 ## What pigweed is
 
@@ -10,15 +11,17 @@ The farm is **location-bounded**: you only see posts and comments from animals w
 
 The vibe is 4chan-flavored anonymity with adult supervision: persistent pseudonym (your animal stays across sessions), bounded community (geo-scoped, not globally exposed), AI moderation gating posts before they land, soft-fading content via community vote thresholds. You can be salty as a goose; you can't be hateful.
 
+> **Update (2026-06): identity is no longer strictly anonymous.** In practice ourlittlefarm is a farm community + reviews: owners post updates (flagged "OP") and customers — the aunties buying eggs — leave reviews, often under their **real names**. The animal/avatar pseudonym is still offered and still the default flavor, but it is **no longer a privacy guarantee**: `username` may be a real name. Read the "never real identity" / "anonymous" language in this doc as historical intent, not a hard constraint — verify before designing a feature around strict anonymity. What still holds: user geo is never stored server-side; IPs are logged for moderation; account age is surfaced; no DMs (harassment vector). Anonymity is now opt-in flavor, not the product's spine.
+
 The visual identity is heavy SVG, GSAP-animated, math-driven. Visual state derives from data state — vote counts make a post card's border grow "bushier," not via stored metadata. Backend stays calm and numeric; the frontend goes feral.
 
 ## Principles
 
-1. **Persistent pseudonym beats pure anonymity.** Your animal stays across sessions. The community gets memory; you keep distance from your real identity.
+1. **Persistent pseudonym beats pure anonymity.** Your animal stays across sessions. The community gets memory; you keep distance from your real identity. _(2026-06: the pseudonym is now optional — many real customers post reviews under their real name. See the Update note above.)_
 2. **Bounded community beats global exposure.** Geo radius is the bound. Smaller community = lighter moderation burden, denser local signal.
 3. **Moderate hate, not spice.** A grumpy goose calling another goose a fucker is authentic punk-farm energy. Slurs and incitement are not. Use moderation categories (`hate`, `harassment`, `violence`, `self-harm`), not curse-word lists.
 4. **Anonymous within the community, never toward an individual.** No anonymous DMs. No "send a message to this specific person" surface, ever. Sarahah and NGL died of this; learn the lesson.
-5. **Be honest about what's anonymous.** Posts: public and anonymous. IPs: logged for moderation. Account age: surfaced. Tell users this; never trade on a privacy promise you can't keep.
+5. **Be honest about what's anonymous.** Posts: public — pseudonymous _or_ real-name, the user's choice (2026-06). IPs: logged for moderation. Account age: surfaced. Tell users this; never trade on a privacy promise you can't keep.
 6. **Data state shapes UI state, not the reverse.** Vote counts drive bushiness; downvote thresholds drive collapse; geo distance drives feed inclusion. The backend never embeds visual concepts; the frontend interprets the numbers.
 
 ## Identity model
@@ -65,13 +68,28 @@ Lives in `src/utils/ranking.ts` (when built). Weights start hard-coded; tune as 
 
 ## Tech stack
 
-Bun runtime, Hono framework, Better Auth, Prisma 7, Supabase Postgres (with PostGIS), Stripe.
+Bun runtime, Hono framework, Better Auth, Prisma 7, Supabase Postgres (with PostGIS), Stripe, Cloudflare R2 (via the `@aws-sdk/client-s3` SDK — R2 is S3-compatible — in `src/utils/storage.ts`, for media), and Redis (`ioredis` → Upstash) for the cross-instance event-bus fan-out in `src/events/bus.ts` (`REDIS_URL` optional; unset = in-process only).
 
 See `memory/project_stack_and_gotchas.md` for the non-obvious traps we've already hit.
 
 ## Shipped backend layers
 
-The full backend backbone is done. Frontend is the only remaining build.
+The full backend backbone is done. The FE social layer was built 2026-06-14/16
+(feed, create-post, profile posts, live toasts); BE is not yet deployed (next:
+Railway — see memory `be-deploy-fe-wiring-checklist`).
+
+> **Update (2026-06) — Post/social additions.** `Post` now has a nullable
+> `category` (enum `PostCategory` = EGGS/VEGGIES/FRUITS/ANIMALS) and an optional
+> `rating` (Int 1–5, reviews); `User.isFarmOwner` (bool) backs the FE "OP"
+> badge (flip manually via Studio/SQL — no admin endpoint). `GET /posts` gained
+> `?authorId=` / `?category=` / `?minRating=` filters. Locales are now
+> **en/ko/zh/ja** (`zh` = Traditional / zh-TW) across the contract + `i18n.ts`.
+> The `CONTENT_FLAGGED` error field is `rejectedCategories` (not `categories`).
+> `POST /media` keys objects as `media/<username>/<category>/<id>.webp`.
+> Tagged one-line loggers (`[posts]`, `[awards]`, `[achievements]`, `[sse]`, …)
+> narrate every state change. Bun.serve sets `idleTimeout: 120` so SSE streams
+> survive the 25s heartbeat. All changes go through the contract first (rebuild
+> it), and DB migrations are run by the user.
 
 - **Auth** — Better Auth + `username` plugin (validation, login-by-username, `is-username-available`) + `emailOTP` plugin (email verification / password reset / OTP sign-in — `sendVerificationOTP` console-logs in dev, swap for Resend in prod) + `@better-auth/passkey` (WebAuthn) + rate limiting on auth surfaces. `requireEmailVerification` is OFF until the FE has a verify UX.
 - **Passkey** — `@better-auth/passkey` plugin. Endpoints: `POST /api/auth/passkey/add-passkey`, `POST /api/auth/sign-in/passkey`, `GET /api/auth/passkey/list-user-passkeys`, `POST /api/auth/passkey/{delete,update}-passkey`. Backed by the `Passkey` Prisma model (shape locked by the plugin — don't add fields it doesn't know about). `rpID` / `rpName` / `origin` come from env (`PASSKEY_RP_ID`, `PASSKEY_RP_NAME`, `PASSKEY_ORIGIN`) with localhost defaults. Prod values bind to `ourlittlefarm.club` — once a passkey is issued against an rpID, changing it orphans the credential, so the apex domain (NOT www.) is the lock-in.

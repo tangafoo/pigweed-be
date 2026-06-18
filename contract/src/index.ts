@@ -425,7 +425,8 @@ export type ErrorCode = z.infer<typeof ErrorCode>;
 export const ContentFlaggedError = z.object({
 	error: z.string(),
 	code: z.literal('CONTENT_FLAGGED'),
-	categories: z.array(z.string())
+	/** Moderation categories that tripped (e.g. "hate") — NOT post categories. */
+	rejectedCategories: z.array(z.string())
 });
 export type ContentFlaggedError = z.infer<typeof ContentFlaggedError>;
 

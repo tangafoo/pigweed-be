@@ -236,6 +236,7 @@ users.get("/me/events", requireSignIn, async (c) => {
         // Initial "hello" event so the client knows the stream opened.
         // Some browsers/proxies hold the first byte; this flushes.
         await stream.writeSSE({ event: "connected", data: JSON.stringify({ userId }) });
+        console.log(`[sse] ${userId} connected`);
 
         // Subscribe to the bus, filtered by this user's id. The returned
         // unsubscribe is captured so we can clean up when the client
@@ -264,6 +265,7 @@ users.get("/me/events", requireSignIn, async (c) => {
         stream.onAbort(() => {
             unsubscribe();
             clearInterval(heartbeat);
+            console.log(`[sse] ${userId} disconnected`);
         });
 
         // Hold the stream open by awaiting a never-resolving promise.
