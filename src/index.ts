@@ -43,6 +43,13 @@ app.get('/', (c) => {
   return c.text('Hello Bitch ass!')
 })
 
+// The egg — same favicon as the FE, so the API root shows the brand mark in a
+// browser tab. Served from static/favicon.png (committed, ships in the image).
+// Browsers also auto-request /favicon.ico, so answer both with the one asset.
+const favicon = Bun.file(new URL('../static/favicon.png', import.meta.url).pathname)
+app.get('/favicon.png', () => new Response(favicon, { headers: { 'content-type': 'image/png' } }))
+app.get('/favicon.ico', () => new Response(favicon, { headers: { 'content-type': 'image/png' } }))
+
 app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw))
 
 app.route('/coins', coins)
