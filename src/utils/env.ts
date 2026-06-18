@@ -78,11 +78,20 @@ const schema = z
 
 const parsed = schema.safeParse(process.env);
 if (!parsed.success) {
-  console.error("❌ Invalid environment configuration:");
-  for (const issue of parsed.error.issues) {
-    console.error(`  • ${issue.path.join(".") || "(env)"}: ${issue.message}`);
-  }
-  throw new Error("Environment validation failed — see errors above.");
+  // Build one string and write it synchronously to stderr. A bare throw at
+  // import time can be killed by the host (Railway) before async log shipping
+  // flushes the last lines — so the crash looks silent. Write it as a single
+  // blocking write, then exit explicitly with a non-zero code.
+  const lines = [
+    "❌ [env] Invalid environment configuration — refusing to boot:",
+    ...parsed.error.issues.map(
+      (issue) => `  • ${issue.path.join(".") || "(env)"}: ${issue.message}`,
+    ),
+    "Set these in the Railway service Variables panel, then redeploy.",
+    "",
+  ];
+  process.stderr.write(lines.join("\n"));
+  process.exit(1);
 }
 
 // Validated, typed env. Accessors below read from this, never process.env.

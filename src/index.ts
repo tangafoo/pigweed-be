@@ -54,10 +54,19 @@ app.route('/users', users)
 app.route('/', awards)
 app.route('/media', media)
 
+const port = Number(process.env.PORT) || 3000
+
+// Positive "I'm alive" banner. Without it, a healthy boot and a crashed boot
+// look equally silent in the deploy logs (the tagged [posts]/[sse]/… loggers
+// are per-request and never fire if the process dies at import time).
+console.log(
+  `[boot] pigweed-be listening on :${port} — env=${process.env.NODE_ENV ?? 'development'}`,
+)
+
 export default {
   // Railway (and most PaaS) inject the port to bind on via $PORT. Fall back
   // to 3000 for local dev where it's unset.
-  port: Number(process.env.PORT) || 3000,
+  port,
   fetch: app.fetch,
   // SSE (`GET /users/me/events`) holds a long-lived connection kept warm by a
   // 25s heartbeat. Bun's default socket idleTimeout is 10s, which would cut

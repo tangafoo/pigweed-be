@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
+    "postinstall": "prisma generate",
     "seed": "bun scripts/seed-coin-packs.ts",
     "seed:awards": "bun scripts/seed-award-types.ts",
     "seed:achievements": "bun scripts/seed-achievements.ts",
