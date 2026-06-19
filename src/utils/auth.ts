@@ -20,6 +20,12 @@ export const auth = betterAuth({
     // CSRF allow-list for credentialed cross-origin auth calls from the
     // FE. Same source as the CORS origins so the two never drift apart.
     trustedOrigins: allowedOrigins(),
+    advanced: {
+        crossSubDomainCookies: {
+            enabled: true,
+            domain: ".ourlittlefarm.club",
+        }
+    },
     emailAndPassword: {
         enabled: true,
         // Enforcement of email verification at sign-in is deliberately OFF
