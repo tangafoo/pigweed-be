@@ -199,6 +199,14 @@ const postSelect = {
     select: { id: true, url: true, kind: true, order: true, width: true, height: true },
     orderBy: { order: "asc" as const },
   },
+  // Relation count for the "N comments" affordance. NOT filtered by
+  // deletedAt: the comments endpoint returns soft-deleted comments too
+  // (redacted to "[deleted]", kept for tree integrity), so the badge must
+  // count them to match the rendered thread. Stripped + remapped to
+  // `commentCount` at every return site (the wire field is never `_count`).
+  _count: {
+    select: { comments: true },
+  },
 } as const;
 
 posts.get("/", optionalSignIn, async (c) => {
@@ -338,8 +346,9 @@ posts.get("/", optionalSignIn, async (c) => {
   ]);
 
   return c.json({
-    posts: rows.map((r) => ({
+    posts: rows.map(({ _count, ...r }) => ({
       ...r,
+      commentCount: _count.comments,
       myVote: voteByPostId.get(r.id) ?? null,
       awards: awardsByPostId.get(r.id) ?? [],
     })),
@@ -363,9 +372,11 @@ posts.get("/:id", optionalSignIn, async (c) => {
     awardSummaries([post.id]),
   ]);
 
+  const { _count, ...rest } = post;
   return c.json({
     post: {
-      ...post,
+      ...rest,
+      commentCount: _count.comments,
       myVote: voteByPostId.get(post.id) ?? null,
       awards: awardsByPostId.get(post.id) ?? [],
     },
@@ -459,7 +470,8 @@ posts.post("/", requireSignIn, async (c) => {
     `[posts] created ${post.id} by ${userId} (category=${category ?? "none"}, rating=${rating ?? "none"}, media=${mediaResult.length})`,
   );
 
-  return c.json({ post }, 201);
+  const { _count, ...rest } = post;
+  return c.json({ post: { ...rest, commentCount: _count.comments } }, 201);
 });
 
 posts.patch("/:id", requireSignIn, async (c) => {
@@ -520,7 +532,8 @@ posts.patch("/:id", requireSignIn, async (c) => {
     select: postSelect,
   });
 
-  return c.json({ post });
+  const { _count, ...rest } = post;
+  return c.json({ post: { ...rest, commentCount: _count.comments } });
 });
 
 posts.delete("/:id", requireSignIn, async (c) => {

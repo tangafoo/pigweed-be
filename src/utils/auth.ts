@@ -21,10 +21,12 @@ export const auth = betterAuth({
     // FE. Same source as the CORS origins so the two never drift apart.
     trustedOrigins: allowedOrigins(),
     advanced: {
-        crossSubDomainCookies: {
-            enabled: true,
-            domain: ".ourlittlefarm.club",
-        }
+        ...(process.env.NODE_ENV === "production" ? {
+            crossSubDomainCookies: {
+                enabled: true,
+                domain: ".ourlittlefarm.club",
+            }
+        } : {}),
     },
     emailAndPassword: {
         enabled: true,

@@ -180,6 +180,12 @@ export const Post = z.object({
 	updatedAt: z.string(),
 	upvoteCount: z.number().int(),
 	downvoteCount: z.number().int(),
+	/**
+	 * Total comments on this post — drives the "N comments" affordance.
+	 * Includes soft-deleted comments: the thread renders them as "[deleted]"
+	 * stubs (kept for tree integrity), so the badge counts them to match.
+	 */
+	commentCount: z.number().int().nonnegative(),
 	moderated: z.boolean(),
 	/** Produce section, or `null` for uncategorized (owner updates / chatter). */
 	category: PostCategory.nullable(),
