@@ -1,0 +1,15 @@
+# Never ship host artifacts into the image — they'd clobber the Linux deps
+# installed inside the container, or leak secrets.
+node_modules
+.git
+.env
+.env.*
+dist
+.wrangler
+*.log
+
+# Build artifact, not source: the Prisma client is regenerated from prisma/
+# schema.prisma inside the image (postinstall). Keeping any local/committed
+# copy out guarantees prod's client always matches the committed schema, even
+# on `railway up` (which uploads the working dir rather than the git commit).
+src/generated
