@@ -87,6 +87,11 @@ model User {
   // Spent on unlocking the attributed granters list for a post/comment.
   // NOT fungible with coinBalance.
   unlockCoins        Int                     @default(0)
+  // Opt-out switch for the end-of-day digest email (comment/reply/upvote
+  // activity). Default on; the unsubscribe link in every digest flips it
+  // false. Transactional mail (welcome, OTP) ignores this flag — only the
+  // batched digest respects it. See src/jobs/send-digests.ts.
+  emailDigest        Boolean                 @default(true)
   sessions           Session[]
   accounts           Account[]
   purchases          CoinPurchase[]
@@ -100,9 +105,55 @@ model User {
   commentUnlocks     CommentGrantersUnlock[]
   achievements       UserAchievement[]
   passkeys           Passkey[]
+  notifications      Notification[]
 
   @@unique([email])
   @@map("user")
+}
+
+// ─────────────────────────────────────────────────────────────
+// NOTIFICATIONS — durable, batched activity records that back the
+// end-of-day digest email. The in-process event bus is LOSSY (and
+// fans out per-instance), so anything that must survive until the
+// nightly job runs lives in Postgres, not on the bus.
+//
+// One row per noteworthy thing that happened TO a user (recipient =
+// userId): someone commented on their post, replied to their comment,
+// or upvoted their post. The digest job aggregates all rows where
+// emailedAt IS NULL per recipient, sends ONE email, and stamps
+// emailedAt so they're never re-sent.
+//
+// actorId / postId / commentId are plain ids (no FK relations) on
+// purpose: posts/comments can be soft-deleted and actors removed, and
+// we don't want cascade churn here — the digest job best-effort joins
+// them and silently drops anything that's since vanished.
+// ─────────────────────────────────────────────────────────────
+
+enum NotificationType {
+  COMMENT_ON_POST // someone commented on the recipient's post
+  REPLY // someone replied to the recipient's comment
+  POST_UPVOTE // someone upvoted the recipient's post
+  COMMENT_UPVOTE // someone upvoted the recipient's comment
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  // Recipient — the user this email will go to.
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  actorId   String? // who did it (commenter / replier / voter)
+  postId    String? // the post involved, when relevant
+  commentId String? // the comment involved (REPLY / COMMENT_ON_POST)
+  createdAt DateTime         @default(now())
+  // null = pending (not yet in a digest). Set to now() by the job after
+  // the digest email is sent. The partial-ish index below keeps the
+  // "find everyone with pending notifications" scan cheap.
+  emailedAt DateTime?
+
+  @@index([userId, emailedAt])
+  @@index([emailedAt])
+  @@map("notification")
 }
 
 // Better Auth's passkey plugin owns this table. Field shape MUST match the
@@ -235,6 +286,11 @@ model Post {
   // geo can't be filtered into anyone's feed.
   latitude      Float
   longitude     Float
+  // Coarse human place label (town/city), reverse-geocoded ONCE at
+  // creation and frozen here — reads never hit a geocoder. Nullable: the
+  // lookup fails open (null) and old rows predate the column. Deliberately
+  // coarse (no street) for poster privacy. See utils/geo.ts:reverseGeocode.
+  locationName  String?
   createdAt     DateTime                               @default(now())
   updatedAt     DateTime                               @updatedAt
   deletedAt     DateTime?
@@ -492,6 +548,7 @@ model CommentGrantersUnlock {
 
 enum AchievementMetric {
   POSTS_CREATED
+  REVIEWS_CREATED // posts that carry a star rating (a "review")
   COMMENTS_CREATED
   AWARDS_GRANTED
 

@@ -27,6 +27,14 @@ const ACHIEVEMENTS: AchievementSeed[] = [
     rewardCoins: 100,
   },
   {
+    key: "first_review",
+    name: "First Review",
+    description: "Leave your first review — a post with a star rating.",
+    metric: "REVIEWS_CREATED",
+    threshold: 1,
+    rewardCoins: 100,
+  },
+  {
     key: "hundred_posts",
     name: "The Garden Grows",
     description: "Make 100 posts.",

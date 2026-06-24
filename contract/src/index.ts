@@ -29,6 +29,7 @@ export type VoteValue = z.infer<typeof VoteValue>;
 
 export const AchievementMetric = z.enum([
 	'POSTS_CREATED',
+	'REVIEWS_CREATED',
 	'COMMENTS_CREATED',
 	'AWARDS_GRANTED'
 ]);
