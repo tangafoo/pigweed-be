@@ -145,6 +145,12 @@ export const UserCount = z.object({
 });
 export type UserCount = z.infer<typeof UserCount>;
 
+/** GET /posts/count — public total post tally, used for "See all (N)" copy. */
+export const PostCount = z.object({
+	count: z.number().int().nonnegative()
+});
+export type PostCount = z.infer<typeof PostCount>;
+
 /**
  * GET /users/:userId — public-facing profile. The identity card the FE
  * renders when you tap an author from a post/comment. Carries everything
@@ -176,6 +182,8 @@ export const Post = z.object({
 	body: z.string(),
 	latitude: z.number(),
 	longitude: z.number(),
+	/** Coarse place label (town/city) reverse-geocoded at creation; `null` if the lookup failed or is unavailable (old rows). */
+	locationName: z.string().nullable(),
 	createdAt: z.string(),
 	updatedAt: z.string(),
 	upvoteCount: z.number().int(),

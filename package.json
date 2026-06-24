@@ -18,6 +18,8 @@
     "delete:user": "bun scripts/delete-user.ts",
     "db:studio": "bunx prisma studio",
     "stripe:listen": "stripe listen --forward-to localhost:3000/stripe/webhook",
+    "jobs:digest": "bun src/jobs/send-digests.ts",
+    "backfill:locations": "bun scripts/backfill-locations.ts",
     "typecheck": "bunx tsc --noEmit",
     "test": "bun test"
   },
