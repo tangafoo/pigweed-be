@@ -3,7 +3,7 @@ import { prisma } from "../utils/db";
 import { VoteValue, Prisma, PostCategory } from "../generated/prisma/client";
 import { makeId, ID_PREFIX } from "../utils/ids";
 import { bus } from "../events/bus";
-import { isValidLatLng, DEFAULT_RADIUS_KM } from "../utils/geo";
+import { isValidLatLng, DEFAULT_RADIUS_KM, reverseGeocode } from "../utils/geo";
 import { RANKING_WEIGHTS } from "../utils/ranking";
 import { moderate } from "../utils/ai/moderator";
 import { r2Config } from "../utils/env";
@@ -178,6 +178,7 @@ const postSelect = {
   body: true,
   latitude: true,
   longitude: true,
+  locationName: true,
   createdAt: true,
   updatedAt: true,
   upvoteCount: true,
@@ -359,6 +360,15 @@ posts.get("/", optionalSignIn, async (c) => {
   });
 });
 
+// GET /posts/count — public total post tally for "See all (N)" copy.
+// Mirrors /users/count. MUST be declared before "/:id" or Hono routes
+// "count" into that param handler. Excludes soft-deleted rows so the
+// number matches what the feed actually shows. Cheap COUNT(*).
+posts.get("/count", async (c) => {
+  const count = await prisma.post.count({ where: { deletedAt: null } });
+  return c.json({ count });
+});
+
 posts.get("/:id", optionalSignIn, async (c) => {
   const id = c.req.param("id");
   const post = await prisma.post.findFirst({
@@ -441,6 +451,10 @@ posts.post("/", requireSignIn, async (c) => {
     );
   }
 
+  // Coarse place label, resolved ONCE here and frozen on the row. Fails
+  // open to null (see reverseGeocode) — never blocks or fails creation.
+  const locationName = await reverseGeocode(latitude, longitude);
+
   const post = await prisma.post.create({
     data: {
       id: makeId(ID_PREFIX.POST),
@@ -449,6 +463,7 @@ posts.post("/", requireSignIn, async (c) => {
       body: content,
       latitude,
       longitude,
+      locationName,
       category,
       rating,
       moderated: mod.moderated,

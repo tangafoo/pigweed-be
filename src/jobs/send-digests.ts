@@ -47,6 +47,7 @@ async function run(): Promise<void> {
       id: true,
       userId: true,
       type: true,
+      actorId: true,
       postId: true,
       commentId: true,
       createdAt: true,
@@ -68,14 +69,15 @@ async function run(): Promise<void> {
   }
 
   // Batch-resolve the lookups so we don't N+1 across users. We need each
-  // post's title + rating (rating ⇒ it's a "review", else a "post") and each
-  // involved comment's body (for the one-line snippet). Actor identity is
-  // intentionally NOT fetched — the digest wording is recipient-centric
-  // ("Your review … got an upvote!"), never "X upvoted …".
+  // post's title + rating (rating ⇒ it's a "review", else a "post"), each
+  // involved comment's body (for the one-line snippet), and the actor's
+  // username — comment/reply BODY lines read "X commented: …" (the recipient-
+  // centric headline lives in the subject + on aggregated lines).
   const postIds = [...new Set(pending.map((n) => n.postId).filter(Boolean))] as string[];
   const commentIds = [...new Set(pending.map((n) => n.commentId).filter(Boolean))] as string[];
+  const actorIds = [...new Set(pending.map((n) => n.actorId).filter(Boolean))] as string[];
 
-  const [recipients, posts, comments] = await Promise.all([
+  const [recipients, posts, comments, actors] = await Promise.all([
     prisma.user.findMany({
       where: { id: { in: [...byUser.keys()] } },
       select: { id: true, email: true, username: true, emailDigest: true },
@@ -88,11 +90,16 @@ async function run(): Promise<void> {
       where: { id: { in: commentIds } },
       select: { id: true, body: true },
     }),
+    prisma.user.findMany({
+      where: { id: { in: actorIds } },
+      select: { id: true, username: true },
+    }),
   ]);
 
   const recipientById = new Map(recipients.map((u) => [u.id, u]));
   const post = new Map(posts.map((p) => [p.id, p]));
   const commentBody = new Map(comments.map((cm) => [cm.id, cm.body]));
+  const actorName = new Map(actors.map((u) => [u.id, u.username]));
 
   // Every line links to the post page (comments live there too) — "the right
   // place" regardless of whether the event was a comment or an upvote.
@@ -132,6 +139,7 @@ async function run(): Promise<void> {
             targetName: truncate(p?.title ?? "a post"),
             href: hrefFor(n.postId),
             snippet,
+            actor: (n.actorId && actorName.get(n.actorId)) || "Someone",
             // Upvotes-on-comments group per comment; everything else per post.
             groupKey: type === "COMMENT_UPVOTE" ? (n.commentId ?? n.id) : (n.postId ?? n.id),
           };

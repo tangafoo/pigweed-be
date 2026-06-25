@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { prisma } from "../utils/db";
 import { VoteValue } from "../generated/prisma/client";
+import { recordNotification } from "../utils/notifications";
 import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
 
 export const votes = new Hono<AuthVars>();
@@ -38,7 +39,7 @@ votes.put("/posts/:postId/vote", requireSignIn, async (c) => {
 
   const post = await prisma.post.findFirst({
     where: { id: postId, deletedAt: null },
-    select: { id: true },
+    select: { id: true, authorId: true },
   });
   if (!post) return c.json({ error: "post not found" }, 404);
 
@@ -76,6 +77,19 @@ votes.put("/posts/:postId/vote", requireSignIn, async (c) => {
   ]);
 
   console.log(`[votes] post ${postId} ${value} by ${userId} → net ${updated.upvoteCount - updated.downvoteCount}`);
+
+  // Digest notification only on a *fresh* upvote — i.e. the vote just
+  // became UP and wasn't UP before (covers null→UP and DOWN→UP, skips
+  // re-affirming an existing UP, which countDeltas already short-circuits
+  // above). Downvotes never notify; we don't email people negativity.
+  if (value === "UP" && existing?.value !== "UP") {
+    recordNotification({
+      recipientId: post.authorId,
+      actorId: userId,
+      type: "POST_UPVOTE",
+      postId,
+    });
+  }
 
   return c.json({ ...updated, myVote: value });
 });
@@ -131,7 +145,7 @@ votes.put("/comments/:commentId/vote", requireSignIn, async (c) => {
 
   const comment = await prisma.comment.findFirst({
     where: { id: commentId, deletedAt: null },
-    select: { id: true },
+    select: { id: true, authorId: true, postId: true },
   });
   if (!comment) return c.json({ error: "comment not found" }, 404);
 
@@ -166,6 +180,19 @@ votes.put("/comments/:commentId/vote", requireSignIn, async (c) => {
   ]);
 
   console.log(`[votes] comment ${commentId} ${value} by ${userId} → net ${updated.upvoteCount - updated.downvoteCount}`);
+
+  // Mirror of post upvotes: notify the comment's author only on a fresh
+  // UP (null→UP / DOWN→UP), never on downvotes. postId rides along so the
+  // digest can show which post the comment was on.
+  if (value === "UP" && existing?.value !== "UP") {
+    recordNotification({
+      recipientId: comment.authorId,
+      actorId: userId,
+      type: "COMMENT_UPVOTE",
+      postId: comment.postId,
+      commentId,
+    });
+  }
 
   return c.json({ ...updated, myVote: value });
 });

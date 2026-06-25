@@ -52,6 +52,13 @@ const schema = z
     // Moderation fails OPEN without this — optional on purpose.
     OPENAI_API_KEY: z.string().optional(),
 
+    // Transactional + digest email (Resend). Optional: with no key, the
+    // email layer fails OPEN and console.logs the message instead of
+    // sending (same dev posture as OPENAI_API_KEY / the OTP console.log).
+    // EMAIL_FROM is the verified sender on the ourlittlefarm.club domain.
+    RESEND_API_KEY: z.string().optional(),
+    EMAIL_FROM: z.string().default("ourlittlefarm <no-reply@ourlittlefarm.club>"),
+
     // Cross-instance event-bus transport. Unset ⇒ pure in-process.
     REDIS_URL: z.string().optional(),
 
@@ -114,6 +121,13 @@ export function databaseUrl(): string {
   return env.DATABASE_URL;
 }
 
+// Public FE base URL — where email "Open the farm" buttons point. The FE
+// is the first CORS origin (prod: https://ourlittlefarm.club). Falls back
+// to the prod domain if CORS_ORIGIN is somehow empty.
+export function appUrl(): string {
+  return (allowedOrigins()[0] ?? "https://ourlittlefarm.club").replace(/\/+$/, "");
+}
+
 export function betterAuthUrl(): string {
   return env.BETTER_AUTH_URL;
 }
@@ -146,6 +160,19 @@ export function stripeWebhookSecret(): string {
 
 export function openaiApiKey(): string | undefined {
   return env.OPENAI_API_KEY;
+}
+
+// ─── Email (Resend) ────────────────────────────────────────────────
+// Unset key ⇒ email fails open (logs instead of sends), so dev needs no
+// account. emailFrom is always defined (has a default). The unsubscribe
+// link in digest emails points back at the BE host (betterAuthUrl), which
+// serves GET /email/unsubscribe.
+export function resendApiKey(): string | undefined {
+  return env.RESEND_API_KEY;
+}
+
+export function emailFrom(): string {
+  return env.EMAIL_FROM;
 }
 
 // Backs the cross-instance fan-out of the event bus (src/events/bus.ts).

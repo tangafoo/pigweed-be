@@ -4,11 +4,14 @@ import { passkey } from "@better-auth/passkey";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { prisma } from "./db";
 import { rollIdentity } from "./identity";
+import { sendEmail } from "./email";
+import { welcomeEmail, otpEmail } from "../emails/templates";
 import {
     allowedOrigins,
     passkeyRpId,
     passkeyRpName,
     passkeyOrigin,
+    appUrl,
 } from "./env";
 
 const c = (color: string, msg: string) => `\x1b[${color}m${msg}\x1b[0m`;
@@ -85,17 +88,22 @@ export const auth = betterAuth({
         // For prod, replace the body with a call to Resend / Postmark / SendGrid.
         emailOTP({
             sendVerificationOTP: async ({ email, otp, type }) => {
-                console.log(
-                    c("33", `[email-otp]`),
-                    `type=${type} email=${email} otp=${otp}`,
-                );
-                // TODO(prod): replace with real email send. Example with Resend:
-                //   await resend.emails.send({
-                //     from: "no-reply@ourlittlefarm.club",
-                //     to: email,
-                //     subject: `ourlittlefarm verification code: ${otp}`,
-                //     html: `Your code is <b>${otp}</b>. Expires in 10 min.`,
-                //   });
+                // Real send via the shared email layer (Resend). With no
+                // RESEND_API_KEY (dev) sendEmail returns ok:false; we then
+                // print the code to the terminal so you can still verify
+                // locally — but we DON'T log it once mail is actually sending,
+                // so the OTP never leaks into prod logs.
+                // NOTE: locale isn't available here (this runs outside the
+                // Hono request context), so the copy is the default locale.
+                // See CLAUDE.md "Real email send" for the locale plumb-through.
+                const { subject, html, text } = otpEmail({ otp, type });
+                const res = await sendEmail({ to: email, subject, html, text });
+                if (!res.ok) {
+                    console.log(
+                        c("33", `[email-otp]`),
+                        `type=${type} email=${email} otp=${otp} (not emailed — dev fallback)`,
+                    );
+                }
             },
         }),
     ],
@@ -134,6 +142,23 @@ export const auth = betterAuth({
                             displayUsername: user.username,
                         },
                     };
+                },
+                // after-create: send the welcome email. Fire-and-forget —
+                // sendEmail fails open (logs in dev / on error) and we never
+                // await it, so a slow or down mail provider can't stall or
+                // fail the signup. The `animal` is now present on the row
+                // (injected by the before hook above).
+                after: async (user) => {
+                    const u = user as typeof user & {
+                        username?: string;
+                        animal?: string;
+                    };
+                    const { subject, html, text } = welcomeEmail({
+                        username: u.username ?? u.name ?? "friend",
+                        animal: u.animal ?? "animal",
+                        appUrl: appUrl(),
+                    });
+                    void sendEmail({ to: user.email, subject, html, text });
                 },
             },
         },

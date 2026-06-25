@@ -3,6 +3,7 @@ import { prisma } from "../utils/db";
 import { VoteValue } from "../generated/prisma/client";
 import { makeId, ID_PREFIX } from "../utils/ids";
 import { bus } from "../events/bus";
+import { recordNotification } from "../utils/notifications";
 import { moderate } from "../utils/ai/moderator";
 import { requireSignIn, type AuthVars } from "../middleware/require-sign-in";
 import { optionalSignIn, type ViewerVars } from "../middleware/optional-sign-in";
@@ -33,7 +34,7 @@ const commentSelect = {
   upvoteCount: true,
   downvoteCount: true,
   moderated: true,
-  author: { select: { id: true, username: true, gender: true, animal: true, avatarSeed: true } },
+  author: { select: { id: true, username: true, gender: true, animal: true, avatarSeed: true, isFarmOwner: true } },
 } as const;
 
 // Reddit-style redaction: deleted rows stay in the list (tree integrity)
@@ -128,21 +129,23 @@ comments.post("/posts/:postId/comments", requireSignIn, async (c) => {
 
   const post = await prisma.post.findFirst({
     where: { id: postId, deletedAt: null },
-    select: { id: true },
+    select: { id: true, authorId: true },
   });
   if (!post) return c.json({ error: "post not found" }, 404);
 
   let depth = 0;
+  let parentAuthorId: string | null = null;
   if (parentCommentId) {
     const parent = await prisma.comment.findFirst({
       where: { id: parentCommentId, deletedAt: null },
-      select: { id: true, postId: true, depth: true },
+      select: { id: true, postId: true, depth: true, authorId: true },
     });
     if (!parent) return c.json({ error: "parent comment not found" }, 404);
     if (parent.postId !== postId) {
       return c.json({ error: "parent comment belongs to a different post" }, 400);
     }
     depth = parent.depth + 1;
+    parentAuthorId = parent.authorId;
   }
 
   const mod = await moderate(text);
@@ -161,11 +164,46 @@ comments.post("/posts/:postId/comments", requireSignIn, async (c) => {
 
   bus.emit({ type: "comment_created", userId });
 
+  // Durable digest records (fire-and-forget; recordNotification drops
+  // self-actions, so a user commenting/replying on their own content
+  // notifies no one). Two recipients, deduped so a single reply never
+  // pings the same person twice:
+  //
+  //  • The POST OWNER hears about ANY new comment/reply on their post
+  //    (COMMENT_ON_POST) — EXCEPT when they're the one being directly
+  //    replied to, since the more-specific REPLY below already covers them.
+  //  • The author of the comment being replied to hears about it (REPLY).
+  const ownerGetsReply = !!parentCommentId && parentAuthorId === post.authorId;
+  if (!ownerGetsReply) {
+    recordNotification({
+      recipientId: post.authorId,
+      actorId: userId,
+      type: "COMMENT_ON_POST",
+      postId,
+      commentId: comment.id,
+    });
+  }
+  if (parentCommentId && parentAuthorId) {
+    recordNotification({
+      recipientId: parentAuthorId,
+      actorId: userId,
+      type: "REPLY",
+      postId,
+      commentId: comment.id,
+    });
+  }
+
   console.log(
     `[comments] created ${comment.id} on ${postId} by ${userId}${parentCommentId ? ` (reply to ${parentCommentId}, depth ${depth})` : ""}`,
   );
 
-  return c.json({ comment }, 201);
+  // Return the FULL contract `Comment` shape, not the bare commentSelect row.
+  // The list endpoint augments each row with myVote/awards/hidden; a freshly
+  // created comment has none of those, but the fields must still be PRESENT
+  // (the contract requires them and the FE's CommentCard reads `awards.slice`,
+  // `hidden`, `myVote` unconditionally). Omitting them made the FE's optimistic
+  // insert throw at render — the comment only appeared after a full refresh.
+  return c.json({ comment: { ...comment, myVote: null, awards: [], hidden: false } }, 201);
 });
 
 // GET /posts/:postId/comments — returns ALL comments on the post (flat list,

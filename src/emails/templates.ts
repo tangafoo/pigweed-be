@@ -117,11 +117,16 @@ ${input.appUrl}/me`;
 
 // ─── 3. Daily digest (batched, nightly cron) ───────────────────────
 // The job hands us EVERY pending event (not a pre-trimmed list) so we can
-// compact per target: a thing with one event reads in full ("Your review
-// “X” got an upvote!"); a thing with many shows a count ("…got 5 upvotes!").
-// Wording is recipient-centric (no actor names) and type-aware — a post
-// with a rating reads as a "review", a bare post as a "post", and comment
-// activity as a "comment". `targetType`/`name`/`snippet` come from the job.
+// compact per target. Two voices, by design:
+//   • The SUBJECT (and the CTA) is the recipient-centric headline of the
+//     single most relevant event — "Your review “Gorgeous Eggs” received a
+//     comment!" — so the inbox preview reads like a real notification, not
+//     clickbait.
+//   • The BODY leads with WHO + WHAT for comments/replies — "frantic_pandan
+//     commented: “…”" — since the headline already said the rest. Upvote
+//     lines stay recipient-centric (there's no text to quote). Aggregated
+//     lines (many events on one target) collapse to a count.
+// `targetType`/`name`/`snippet`/`actor` come from the job.
 export interface DigestItem {
   /** post (no rating) vs review (rated post) vs comment — drives the noun. */
   targetType: "post" | "review" | "comment";
@@ -131,6 +136,8 @@ export interface DigestItem {
   href: string;
   /** The comment/reply text (truncated) — shown on comment-related lines. */
   snippet?: string;
+  /** Username of whoever acted — leads the comment/reply body line. */
+  actor?: string;
   /** Compaction key: postId for post-targeted events, commentId for comment. */
   groupKey: string;
 }
@@ -154,10 +161,22 @@ export function digestEmail(data: DigestData): RenderedEmail {
   ];
   const total = all.length;
 
-  const subject =
-    total === 1
-      ? "You have 1 new notification on ourlittlefarm"
-      : `You have ${total} new notifications on ourlittlefarm`;
+  // The LEAD event (highest-priority kind first) drives the subject, the
+  // preheader, and — when it's the only one — the CTA. Direct interaction
+  // (comments/replies) outranks upvotes. total is always ≥1 (the job never
+  // builds an empty digest), so a lead always exists.
+  const lead: { kind: DigestKind; item: DigestItem } = data.commentsOnPosts[0]
+    ? { kind: "comment", item: data.commentsOnPosts[0] }
+    : data.replies[0]
+      ? { kind: "reply", item: data.replies[0] }
+      : data.upvotes[0]
+        ? { kind: "upvote", item: data.upvotes[0] }
+        : { kind: "commentUpvote", item: data.commentUpvotes[0]! };
+
+  // Subject = the lead event's real headline, never "You have N notifications"
+  // (reads as spam). Any other events get a quiet "(+N more)".
+  const headline = digestHeadline(lead.kind, lead.item);
+  const subject = total === 1 ? headline : `${headline} (+${total - 1} more)`;
 
   const sections = [
     renderSection("💬 New comments on your posts", data.commentsOnPosts, commentLineHtml),
@@ -168,12 +187,12 @@ export function digestEmail(data: DigestData): RenderedEmail {
     .filter(Boolean)
     .join("");
 
-  // CTA: when the whole digest is a single event, the button goes straight
-  // to that exact post/review/comment ("View review"). Otherwise it's the
-  // generic farm link (a multi-item digest has no single "right place").
+  // CTA: a single-event digest links straight to that exact post/review/
+  // comment ("View review"); a multi-item digest has no single "right place"
+  // so it's the generic farm link.
   const cta =
     total === 1
-      ? button(`View ${all[0]!.targetType}`, all[0]!.href)
+      ? button(`View ${lead.item.targetType}`, lead.item.href)
       : button("Open the farm", data.appUrl);
 
   const html = layout(
@@ -181,7 +200,11 @@ export function digestEmail(data: DigestData): RenderedEmail {
       sections +
       `<p style="margin:22px 0 0;">${cta}</p>`,
     {
-      preview: `${total} new ${total === 1 ? "thing" : "things"} happened on your farm.`,
+      // Preheader (inbox preview line): the lead event's comment text when it
+      // has one, else a gentle count.
+      preview:
+        lead.item.snippet ??
+        `${total} new ${total === 1 ? "thing" : "things"} happened on your farm.`,
       unsubscribeUrl: data.unsubscribeUrl,
     },
   );
@@ -201,6 +224,28 @@ export function digestEmail(data: DigestData): RenderedEmail {
   return { subject, html, text };
 }
 
+// Which section an event belongs to — drives subject phrasing.
+type DigestKind = "comment" | "reply" | "upvote" | "commentUpvote";
+
+// Recipient-centric one-liner — the email SUBJECT (plain text). "Your review
+// “Gorgeous Eggs” received a comment!" reads like a real notification.
+function digestHeadline(kind: DigestKind, item: DigestItem): string {
+  const subj =
+    item.targetType === "comment"
+      ? "Your comment"
+      : `Your ${item.targetType} “${item.targetName}”`;
+  switch (kind) {
+    case "comment":
+      return `${subj} received a comment!`;
+    case "reply":
+      return "Your comment received a reply!";
+    case "upvote":
+      return `${subj} got an upvote!`;
+    case "commentUpvote":
+      return "Your comment got an upvote!";
+  }
+}
+
 // ─── Section compaction ────────────────────────────────────────────
 // Cap post/comment lines per section so a busy day can't produce a wall of
 // text; overflow collapses into "…and N more".
@@ -211,6 +256,7 @@ interface TargetGroup {
   name: string;
   href: string;
   snippet?: string;
+  actor?: string;
   count: number;
 }
 
@@ -227,6 +273,7 @@ function groupItems(items: DigestItem[]): { groups: TargetGroup[]; more: number 
         name: it.targetName,
         href: it.href,
         snippet: it.snippet,
+        actor: it.actor,
         count: 1,
       });
   }
@@ -272,29 +319,33 @@ function upvoteLineText(g: TargetGroup): string {
   return `${subjectText(g)} got ${pluralText(g.count, "an upvote", "upvotes")}!`;
 }
 
+// A muted quote span for the comment text.
+function quote(snippet: string): string {
+  return ` <span style="color:${colors.MUTED};">“${escapeHtml(snippet)}”</span>`;
+}
+const who = (g: TargetGroup) => alink(g.href, escapeHtml(g.actor ?? "Someone"));
+
+// Single comment → "<actor> commented: “…”" (the headline lives in the
+// subject). Many → recipient-centric count, since there's no single actor.
 function commentLineHtml(g: TargetGroup): string {
-  const base = `${alink(g.href, subjectInner(g))} received ${plural(g.count, "a comment", "comments")}!`;
-  return g.count === 1 && g.snippet
-    ? `${base} <span style="color:${colors.MUTED};">“${escapeHtml(g.snippet)}”</span>`
-    : base;
+  if (g.count === 1) return `${who(g)} commented${g.snippet ? `:${quote(g.snippet)}` : "."}`;
+  return `${alink(g.href, subjectInner(g))} received <b>${g.count}</b> comments`;
 }
 function commentLineText(g: TargetGroup): string {
-  const base = `${subjectText(g)} received ${pluralText(g.count, "a comment", "comments")}!`;
-  return g.count === 1 && g.snippet ? `${base} “${g.snippet}”` : base;
+  if (g.count === 1)
+    return `${g.actor ?? "Someone"} commented${g.snippet ? `: “${g.snippet}”` : "."}`;
+  return `${subjectText(g)} received ${g.count} comments`;
 }
 
-// Replies: the subject is always "Your comment"; the snippet is the REPLY's
-// text (not the parent), so it's appended as the quote rather than used in
-// the subject.
+// Replies mirror comments. The snippet is the REPLY's text.
 function replyLineHtml(g: TargetGroup): string {
-  const base = `${alink(g.href, "Your comment")} received ${plural(g.count, "a reply", "replies")}!`;
-  return g.count === 1 && g.snippet
-    ? `${base} <span style="color:${colors.MUTED};">“${escapeHtml(g.snippet)}”</span>`
-    : base;
+  if (g.count === 1) return `${who(g)} replied${g.snippet ? `:${quote(g.snippet)}` : "."}`;
+  return `${alink(g.href, "Your comment")} received <b>${g.count}</b> replies`;
 }
 function replyLineText(g: TargetGroup): string {
-  const base = `Your comment received ${pluralText(g.count, "a reply", "replies")}!`;
-  return g.count === 1 && g.snippet ? `${base} “${g.snippet}”` : base;
+  if (g.count === 1)
+    return `${g.actor ?? "Someone"} replied${g.snippet ? `: “${g.snippet}”` : "."}`;
+  return `Your comment received ${g.count} replies`;
 }
 
 // One titled block of <li>s, or "" when empty. `line` builds each group's
