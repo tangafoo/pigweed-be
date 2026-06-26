@@ -5,6 +5,8 @@ import { allowedOrigins } from './utils/env'
 import { auth } from './utils/auth'
 import { i18nMiddleware } from './middleware/i18n'
 import { coins } from './routes/coins'
+import { subscriptions } from './routes/subscriptions'
+import { admin } from './routes/admin'
 import { stripeWebhook } from './routes/stripe-webhook'
 import { posts } from './routes/posts'
 import { comments } from './routes/comments'
@@ -55,6 +57,8 @@ app.get('/favicon.ico', () => new Response(favicon, { headers: { 'content-type':
 app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw))
 
 app.route('/coins', coins)
+app.route('/subscriptions', subscriptions)
+app.route('/admin', admin)
 app.route('/stripe/webhook', stripeWebhook)
 app.route('/posts', posts)
 app.route('/', comments)

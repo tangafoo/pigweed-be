@@ -194,6 +194,7 @@ const postSelect = {
       animal: true,
       avatarSeed: true,
       isFarmOwner: true,
+      isFoundingFlock: true,
     },
   },
   media: {

@@ -53,6 +53,17 @@ const ACHIEVEMENTS: AchievementSeed[] = [
   // generous_soul intentionally removed: the Postgres trigger already
   // grants +5 unlockCoins on every 10th award, so an additional coinBalance
   // bonus on the same milestone would double-dip.
+  {
+    key: "founding_flock",
+    name: "Founding Flock",
+    description: "One of the first to join the farm — a founding flock member.",
+    // MANUAL: never auto-evaluated. Granted only when an admin toggles the
+    // founding-flock flair on a user (see routes/admin.ts). Threshold is a
+    // formality; evaluateMetric("MANUAL") always returns 0.
+    metric: "MANUAL",
+    threshold: 1,
+    rewardCoins: 200,
+  },
 ];
 
 async function main() {

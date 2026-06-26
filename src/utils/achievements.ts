@@ -48,6 +48,11 @@ export async function evaluateMetric(
       ]);
       return postAwardsGranted + commentAwardsGranted;
     }
+    case "MANUAL":
+      // Never auto-granted — there is no metric to count. Returning 0 keeps
+      // the backfill/engine from ever clearing the threshold; these are
+      // awarded only by an explicit grantAchievementByKey() call.
+      return 0;
   }
 }
 
@@ -93,6 +98,24 @@ export async function grantAchievement(
     }
     return null;
   }
+}
+
+// Grant a specific achievement by its catalog `key`, regardless of any
+// metric/threshold — for manually-awarded badges like "Founding Flock".
+// Silent by design (no email/SSE), matching the admin-toggle UX and the
+// "don't email subscribers yet" rule. Idempotent (grantAchievement is
+// P2002-safe). Returns true on a fresh grant.
+export async function grantAchievementByKey(userId: string, key: string): Promise<boolean> {
+  const a = await prisma.achievement.findUnique({
+    where: { key },
+    select: { id: true, key: true, rewardCoins: true },
+  });
+  if (!a) {
+    console.warn(`[achievements] grantByKey: no achievement "${key}"`);
+    return false;
+  }
+  const granted = await grantAchievement(userId, a);
+  return !!granted;
 }
 
 // Fetches all candidate achievements for a metric, evaluates the user's
