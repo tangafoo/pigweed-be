@@ -115,7 +115,88 @@ ${input.appUrl}/me`;
   return { subject, html, text };
 }
 
-// ─── 3. Daily digest (batched, nightly cron) ───────────────────────
+// ─── 3. Magic-link login (real-time, Better Auth) ──────────────────
+// Backs auth.ts's magicLink sendMagicLink. The CLI onboarding script
+// (scripts/register-subscriber.ts) triggers this so an email-only customer
+// can log in with one click — no password to remember.
+export function magicLinkEmail(input: { url: string; username: string }): RenderedEmail {
+  const subject = "Your ourlittlefarm sign-in link";
+
+  const html = layout(
+    heading(`Sign in, ${input.username}`) +
+      paragraph(
+        "Tap the button to sign in to ourlittlefarm. The link is single-use and expires shortly.",
+      ) +
+      `<p style="margin:22px 0 0;">${button("Sign in to the farm", input.url)}</p>` +
+      paragraph(
+        `<span style="font-size:13px;color:${colors.MUTED};">Didn't ask to sign in? You can safely ignore this email.</span>`,
+      ),
+    { preview: "Your single-use sign-in link for ourlittlefarm." },
+  );
+
+  const text = `Sign in to ourlittlefarm, ${input.username}:\n${input.url}\n\nThe link is single-use and expires shortly. Didn't ask to sign in? Ignore this email.`;
+
+  return { subject, html, text };
+}
+
+// ─── 4. Subscription started (real-time, on Stripe checkout) ────────
+export function subscriptionStartedEmail(input: {
+  username: string;
+  priceLabel: string; // e.g. "RM50/week"
+  eggsPerDelivery: number;
+  appUrl: string;
+}): RenderedEmail {
+  const subject = "Your egg subscription is live 🥚";
+  const price = escapeHtml(input.priceLabel);
+
+  const html = layout(
+    heading(`You're subscribed, ${input.username}!`) +
+      paragraph(
+        `A fresh tray of <b>${input.eggsPerDelivery} eggs</b> is on its way to you every week. We'll auto-charge <b>${price}</b> — nothing else to do.`,
+      ) +
+      `<p style="margin:22px 0 0;">${button("See your egg stats", `${input.appUrl}/subscriptions`)}</p>`,
+    { preview: `${input.eggsPerDelivery} eggs a week, ${input.priceLabel}.` },
+  );
+
+  const text = `You're subscribed, ${input.username}!
+
+A fresh tray of ${input.eggsPerDelivery} eggs is on its way every week. We'll auto-charge ${input.priceLabel}.
+
+See your egg stats: ${input.appUrl}/subscriptions`;
+
+  return { subject, html, text };
+}
+
+// ─── 5. Payment failed (real-time, on Stripe invoice.payment_failed) ─
+export function paymentFailedEmail(input: {
+  username: string;
+  appUrl: string;
+}): RenderedEmail {
+  const subject = "We couldn't charge your egg subscription";
+
+  const html = layout(
+    heading(`A quick payment hiccup, ${input.username}`) +
+      paragraph(
+        "We tried to charge this week's egg delivery but the payment didn't go through. Update your card to keep the eggs coming — Stripe will retry automatically.",
+      ) +
+      `<p style="margin:22px 0 0;">${button("Update payment", `${input.appUrl}/subscriptions`)}</p>`,
+    { preview: "Update your card to keep your egg subscription active." },
+  );
+
+  const text = `A quick payment hiccup, ${input.username}.
+
+We tried to charge this week's egg delivery but it didn't go through. Update your card to keep the eggs coming:
+${input.appUrl}/subscriptions`;
+
+  return { subject, html, text };
+}
+
+// NOTE: subscriptionStartedEmail + paymentFailedEmail above are wired into the
+// (dormant) Stripe webhook and only fire under phase-2 auto-billing. No
+// subscriber-facing email is sent today — manual subscribers are managed from
+// the admin panel, not nagged by mail.
+
+// ─── 6. Daily digest (batched, nightly cron) ───────────────────────
 // The job hands us EVERY pending event (not a pre-trimmed list) so we can
 // compact per target. Two voices, by design:
 //   • The SUBJECT (and the CTA) is the recipient-centric headline of the

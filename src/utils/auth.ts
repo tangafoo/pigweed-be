@@ -1,11 +1,11 @@
 import { betterAuth } from "better-auth";
-import { username, emailOTP } from "better-auth/plugins";
+import { username, emailOTP, magicLink } from "better-auth/plugins";
 import { passkey } from "@better-auth/passkey";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { prisma } from "./db";
 import { rollIdentity } from "./identity";
 import { sendEmail } from "./email";
-import { welcomeEmail, otpEmail } from "../emails/templates";
+import { welcomeEmail, otpEmail, magicLinkEmail } from "../emails/templates";
 import {
     allowedOrigins,
     passkeyRpId,
@@ -51,6 +51,7 @@ export const auth = betterAuth({
             "/sign-in/username": { window: 60, max: 5 },
             "/sign-up/email": { window: 60, max: 5 },
             "/email-otp/send-verification-otp": { window: 60, max: 3 },
+            "/sign-in/magic-link": { window: 60, max: 3 },
         },
     },
     plugins: [
@@ -102,6 +103,30 @@ export const auth = betterAuth({
                     console.log(
                         c("33", `[email-otp]`),
                         `type=${type} email=${email} otp=${otp} (not emailed — dev fallback)`,
+                    );
+                }
+            },
+        }),
+        // Passwordless one-click login. Backs POST /api/auth/sign-in/magic-link.
+        // The CLI onboarding script (scripts/register-subscriber.ts) calls
+        // auth.api.signInMagicLink to email an existing email-only customer a
+        // login link — no password to remember. sendMagicLink fails open like
+        // the OTP callback (sendEmail logs in dev). The link target is the FE
+        // (appUrl), where Better Auth's client verifies the token.
+        magicLink({
+            sendMagicLink: async ({ email, url }) => {
+                // Best-effort username for the greeting — single fail-open
+                // lookup; fall back to the email local-part if absent.
+                const user = await prisma.user
+                    .findUnique({ where: { email }, select: { username: true } })
+                    .catch(() => null);
+                const name = user?.username ?? email.split("@")[0];
+                const { subject, html, text } = magicLinkEmail({ url, username: name });
+                const res = await sendEmail({ to: email, subject, html, text });
+                if (!res.ok) {
+                    console.log(
+                        c("33", `[magic-link]`),
+                        `email=${email} url=${url} (not emailed — dev fallback)`,
                     );
                 }
             },
