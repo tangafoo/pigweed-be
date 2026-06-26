@@ -20,6 +20,10 @@ export const ID_PREFIX = {
   POST_AWARD: "paw",
   COMMENT_AWARD: "caw",
   ACHIEVEMENT: "ach",
+  SUBSCRIPTION_PLAN: "subplan",
+  SUBSCRIPTION: "sub",
+  SUBSCRIPTION_PAYMENT: "subpay",
+  SUBSCRIPTION_BENEFIT: "subben",
 } as const;
 
 export const makeId = (prefix: string) => `${prefix}_${crypto.randomUUID().replace(/-/g, "")}`;
