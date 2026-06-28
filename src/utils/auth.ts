@@ -118,10 +118,14 @@ export const auth = betterAuth({
                 // Best-effort username for the greeting — single fail-open
                 // lookup; fall back to the email local-part if absent.
                 const user = await prisma.user
-                    .findUnique({ where: { email }, select: { username: true } })
+                    .findUnique({ where: { email }, select: { username: true, animal: true } })
                     .catch(() => null);
                 const name = user?.username ?? email.split("@")[0];
-                const { subject, html, text } = magicLinkEmail({ url, username: name });
+                const { subject, html, text } = magicLinkEmail({
+                    url,
+                    username: name,
+                    animal: user?.animal,
+                });
                 const res = await sendEmail({ to: email, subject, html, text });
                 if (!res.ok) {
                     console.log(
@@ -138,8 +142,15 @@ export const auth = betterAuth({
     user: {
         additionalFields: {
             gender: { type: "string", required: true, input: true },
+            // Optional contact number — settable at signup AND via updateUser
+            // (settings). No verification yet.
+            phoneNumber: { type: "string", required: false, input: true },
             animal: { type: "string", required: false, input: false },
             avatarSeed: { type: "number", required: false, input: false },
+            avatarRerolls: { type: "number", required: false, input: false },
+            isFoundingFlock: { type: "boolean", required: false, input: false },
+            isFarmOwner: { type: "boolean", required: false, input: false },
+            isAdmin: { type: "boolean", required: false, input: false },
             coinBalance: { type: "number", required: false, input: false },
             unlockCoins: { type: "number", required: false, input: false },
         },

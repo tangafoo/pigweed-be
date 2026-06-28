@@ -59,6 +59,17 @@ const schema = z
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().default("ourlittlefarm <no-reply@ourlittlefarm.club>"),
 
+    // Absolute URL of the brand logo shown in every email header. Must be a
+    // publicly-reachable raster (PNG/JPEG) — email clients fetch it over HTTP
+    // and refuse SVG/WebP. Lives in the ourlittlefarm-assets R2 bucket; swap
+    // the file (same key) or repoint this var to change it everywhere.
+    EMAIL_LOGO_URL: z
+      .string()
+      .default("https://media.ourlittlefarm.club/olf-logo.png"),
+
+    // Where the contact / "egg feedback" form delivers (the boss's inbox).
+    FEEDBACK_TO: z.string().default("leeminjacque@gmail.com"),
+
     // Cross-instance event-bus transport. Unset ⇒ pure in-process.
     REDIS_URL: z.string().optional(),
 
@@ -173,6 +184,16 @@ export function resendApiKey(): string | undefined {
 
 export function emailFrom(): string {
   return env.EMAIL_FROM;
+}
+
+// Absolute URL of the brand logo embedded in every email header (see schema).
+export function emailLogoUrl(): string {
+  return env.EMAIL_LOGO_URL;
+}
+
+// Recipient inbox for the contact / feedback form.
+export function feedbackTo(): string {
+  return env.FEEDBACK_TO;
 }
 
 // Backs the cross-instance fan-out of the event bus (src/events/bus.ts).

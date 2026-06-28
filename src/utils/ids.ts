@@ -24,6 +24,7 @@ export const ID_PREFIX = {
   SUBSCRIPTION: "sub",
   SUBSCRIPTION_PAYMENT: "subpay",
   SUBSCRIPTION_BENEFIT: "subben",
+  EGG_ORDER: "egg",
 } as const;
 
 export const makeId = (prefix: string) => `${prefix}_${crypto.randomUUID().replace(/-/g, "")}`;
