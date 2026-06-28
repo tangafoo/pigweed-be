@@ -60,6 +60,9 @@ model User {
   name               String
   email              String
   emailVerified      Boolean                 @default(false)
+  // Optional contact number — set at signup or in settings. Stored plainly
+  // (no SMS verification yet); private (owner session + admin only).
+  phoneNumber        String?
   createdAt          DateTime                @default(now())
   updatedAt          DateTime                @updatedAt
   // Identity — animals on the pigweed farm. See CLAUDE.md.
@@ -72,11 +75,23 @@ model User {
   gender             Gender
   animal             Animal
   avatarSeed         Int // feeds deterministic FE color/pattern math
+  // Post-onboarding avatar rerolls used. Signup rerolls are unlimited (the
+  // reroll endpoint only increments this when called with ?limited=1, from the
+  // settings card), so a user gets exactly ONE animal re-roll after signup.
+  avatarRerolls      Int                     @default(0)
   // ourlittlefarm owner flag — owners' posts get a Reddit-style "OP" badge
   // so visitors can tell owner updates (farm pics/news) from customer
   // reviews. Default false; flipped manually (Studio/SQL) for the handful
   // of real owners. Surfaced read-only on the embedded post/comment author.
   isFarmOwner        Boolean                 @default(false)
+  // Founding-flock flair — early subscribers wear a badge (like the OP badge)
+  // on their posts/comments. Toggled manually by an admin from the panel.
+  // Mirrors isFarmOwner's wiring exactly (selected onto the embedded author).
+  isFoundingFlock    Boolean                 @default(false)
+  // Admin-panel access (the boss). Set via CLI/Studio; gates every /admin/*
+  // route. Separate from isFarmOwner so the public OP badge and the internal
+  // admin power never get coupled.
+  isAdmin            Boolean                 @default(false)
   // Note: pigweed does NOT store user current geo. The FE knows where
   // the user is (browser geolocation API) and sends lat/lng on each
   // request that needs it (post creation, feed query). Privacy-cleaner;
@@ -92,6 +107,10 @@ model User {
   // false. Transactional mail (welcome, OTP) ignores this flag — only the
   // batched digest respects it. See src/jobs/send-digests.ts.
   emailDigest        Boolean                 @default(true)
+  // Stripe customer handle, lazily created the first time the user starts a
+  // coin purchase or egg subscription that needs one. Reused across both so a
+  // user has exactly one Stripe customer. Nullable: most users never buy.
+  stripeCustomerId   String?                 @unique
   sessions           Session[]
   accounts           Account[]
   purchases          CoinPurchase[]
@@ -106,9 +125,40 @@ model User {
   achievements       UserAchievement[]
   passkeys           Passkey[]
   notifications      Notification[]
+  subscription       Subscription?
+  subscriptionPayments SubscriptionPayment[]
+  eggOrders          EggOrder[]
 
   @@unique([email])
   @@map("user")
+}
+
+// ─────────────────────────────────────────────────────────────
+// EGG ORDERS — the order ledger. One row = one delivery/order of N
+// eggs on a date. MANUAL rows are added by the admin (eggs are sold
+// over WhatsApp); SUBSCRIPTION rows are fired by the weekly delivery
+// cron for active subscriptions. A user's "eggs eaten" and "last
+// order" are DERIVED from this (SUM/MAX) — never denormalized.
+// ─────────────────────────────────────────────────────────────
+
+enum EggOrderSource {
+  MANUAL
+  SUBSCRIPTION
+
+  @@map("egg_order_source")
+}
+
+model EggOrder {
+  id        String         @id @default(cuid())
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eggs      Int
+  orderedAt DateTime       @default(now())
+  source    EggOrderSource @default(MANUAL)
+  createdAt DateTime       @default(now())
+
+  @@index([userId, orderedAt])
+  @@map("egg_order")
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -266,6 +316,152 @@ model CoinPurchase {
 
   @@index([userId])
   @@map("coin_purchase")
+}
+
+// ─────────────────────────────────────────────────────────────
+// EGG SUBSCRIPTIONS — a standing RM50/week order. Two billing
+// modes coexist behind one model:
+//   • STRIPE — the customer has a card on file; Stripe owns the
+//     recurring charge and we react to its webhooks (invoice.*).
+//   • MANUAL — onboarded-by-email customers (the "aunties") who
+//     still pay cash/transfer. No Stripe subscription; a weekly
+//     job nudges the farm owner (WhatsApp) + the customer (email)
+//     until they add a card and convert to STRIPE.
+//
+// SubscriptionPlan is the catalog (mirrors Stripe Product/Price,
+// like CoinPack). Subscription is one-per-user. SubscriptionPayment
+// is the per-delivery ledger — one row = one paid week = one egg
+// tray — and powers the "you've eaten N eggs" stats page.
+// ─────────────────────────────────────────────────────────────
+
+enum SubscriptionStatus {
+  PENDING // (phase 2) Stripe checkout started, not yet confirmed
+  ACTIVE // currently receiving eggs (manually collected today)
+  PAUSED // temporarily paused by the subscriber/admin ("pause anytime" perk)
+  PAST_DUE // (phase 2) a Stripe invoice failed
+  CANCELED
+
+  @@map("subscription_status")
+}
+
+enum SubscriptionBillingMode {
+  STRIPE // card on file, Stripe auto-charges weekly
+  MANUAL // cash/transfer, farm owner collects; weekly nudge job
+
+  @@map("subscription_billing_mode")
+}
+
+model SubscriptionPlan {
+  id              String         @id @default(cuid())
+  name            String
+  // (phase 2) Stripe Price id. NULL today — subscriptions are manual; the
+  // seed creates no Stripe price. Populated when Stripe billing is switched on.
+  stripePriceId   String?        @unique
+  priceCents      Int            // total per delivery; RM2/egg → eggs × 200
+  currency        String         @default("myr")
+  // Eggs in one delivery. Tiers: 120 / 60 / 30. Drives both the price
+  // (eggs × RM2) and the fun "you've eaten N eggs" stats.
+  eggsPerDelivery Int            @default(30)
+  // Delivery cadence in weeks: 1 = weekly, 2 = bi-weekly (the 30-egg tier).
+  // (phase 2) maps to Stripe's recurring interval_count on a weekly price.
+  cadenceWeeks    Int            @default(1)
+  // Display order on the subscribe page (lowest first).
+  sortOrder       Int            @default(0)
+  active          Boolean        @default(true)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  subscriptions   Subscription[]
+  benefits        PlanBenefit[]
+
+  @@map("subscription_plan")
+}
+
+model Subscription {
+  id                   String                  @id @default(cuid())
+  userId               String                  @unique
+  user                 User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId               String
+  plan                 SubscriptionPlan        @relation(fields: [planId], references: [id])
+  status               SubscriptionStatus      @default(PENDING)
+  billingMode          SubscriptionBillingMode
+  // Effective start of the subscription. Distinct from createdAt (the row's
+  // insert time) so an admin can BACKFILL a customer who's been subscribed for
+  // months — drives the "subscribing since" + egg-journey stats.
+  startedAt            DateTime                @default(now())
+  // Weekly delivery day, 0=Sun … 6=Sat (default 4 = Thursday). Admin-editable
+  // ("request a different day"); the FE calendar marks these with an egg.
+  deliveryDay          Int                     @default(4)
+  // Set once Stripe owns the recurring charge (STRIPE mode); null for MANUAL.
+  stripeSubscriptionId String?                 @unique
+  // Synced from Stripe invoices/subscription events. Null for MANUAL.
+  currentPeriodEnd     DateTime?
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+  canceledAt           DateTime?
+  payments             SubscriptionPayment[]
+
+  @@index([status])
+  @@map("subscription")
+}
+
+// (phase 2) Per-delivery payment ledger — written by the Stripe invoice
+// webhook when auto-billing is switched on. Dormant today (manual payments
+// happen off-platform via WhatsApp/bank transfer); kept so phase 2 is purely
+// additive. One row = one paid delivery.
+model SubscriptionPayment {
+  id                String                  @id @default(cuid())
+  subscriptionId    String
+  subscription      Subscription            @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  userId            String
+  user              User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Webhook idempotency key (Stripe event id). Null for MANUAL deliveries.
+  stripeEventId     String?                 @unique
+  stripeInvoiceId   String?
+  amountCents       Int
+  currency          String                  @default("myr")
+  mode              SubscriptionBillingMode
+  paidAt            DateTime                @default(now())
+
+  @@index([userId])
+  @@index([subscriptionId])
+  @@map("subscription_payment")
+}
+
+// ─────────────────────────────────────────────────────────────
+// SUBSCRIPTION BENEFITS — the editable perk list shown on the
+// subscribe page (guaranteed eggs, priority allocation, durian
+// first-access, …). Global (not tier-scoped) for now: every
+// subscriber gets the same package. Managed by the admin panel
+// (CRUD via /admin/benefits) rather than seed-only, since the boss
+// will reword/reorder these over time. This is the seed of the CRM.
+// ─────────────────────────────────────────────────────────────
+
+model SubscriptionBenefit {
+  id        String        @id @default(cuid())
+  label     String
+  sortOrder Int           @default(0)
+  active    Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  plans     PlanBenefit[]
+
+  @@map("subscription_benefit")
+}
+
+// Per-tier benefit checklist: a row here means "this tier includes this
+// benefit". Many-to-many between SubscriptionPlan and SubscriptionBenefit so
+// a perk's text lives once in the catalog and each tier just checks it on/off.
+// The admin panel renders the full catalog as checkboxes per tier; PUT
+// /admin/plans/:id/benefits replaces a tier's checked set.
+model PlanBenefit {
+  planId    String
+  plan      SubscriptionPlan    @relation(fields: [planId], references: [id], onDelete: Cascade)
+  benefitId String
+  benefit   SubscriptionBenefit @relation(fields: [benefitId], references: [id], onDelete: Cascade)
+
+  @@id([planId, benefitId])
+  @@index([benefitId])
+  @@map("plan_benefit")
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -551,6 +747,9 @@ enum AchievementMetric {
   REVIEWS_CREATED // posts that carry a star rating (a "review")
   COMMENTS_CREATED
   AWARDS_GRANTED
+  // Never auto-evaluated (evaluateMetric returns 0): awarded only by an
+  // explicit grant. Backs the admin-toggled "Founding Flock" badge.
+  MANUAL
 
   @@map("achievement_metric")
 }

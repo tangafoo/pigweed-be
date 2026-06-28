@@ -4,6 +4,8 @@
 // the element. Keep the palette and structure here; templates.ts supplies
 // the body. Brand: the public name is "ourlittlefarm" (never "pigweed").
 
+import { emailLogoUrl } from "../utils/env";
+
 // Punk-farm palette, muted for email (loud colors trip spam heuristics).
 const INK = "#1c1a17";
 const PAPER = "#faf7f0";
@@ -48,7 +50,7 @@ export function layout(bodyHtml: string, opts: LayoutOptions = {}): string {
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;">
             <tr>
               <td style="padding:0 8px 16px;">
-                <span style="font-size:20px;font-weight:700;letter-spacing:-0.02em;color:${ACCENT};">🥚 ourlittlefarm</span>
+                <img src="${emailLogoUrl()}" alt="ourlittlefarm" height="28" style="display:block;height:28px;width:auto;max-width:200px;border:0;outline:none;text-decoration:none;" />
               </td>
             </tr>
             <tr>

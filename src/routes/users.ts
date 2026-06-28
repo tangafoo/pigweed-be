@@ -49,6 +49,10 @@ users.get("/:userId", async (c) => {
                 select: {
                     posts: { where: { deletedAt: null } },
                     comments: { where: { deletedAt: null } },
+                    // Votes cast — counted raw (the votes endpoint paginates all
+                    // of them, redacting deleted targets rather than dropping rows).
+                    postVotes: true,
+                    commentVotes: true,
                 },
             },
         },
@@ -65,6 +69,8 @@ users.get("/:userId", async (c) => {
         createdAt: user.createdAt.toISOString(),
         postCount: user._count.posts,
         commentCount: user._count.comments,
+        postVoteCount: user._count.postVotes,
+        commentVoteCount: user._count.commentVotes,
     });
 });
 
@@ -212,13 +218,50 @@ users.post("/me/avatar/reroll", requireSignIn, async (c) => {
     const userId = c.get("userId");
     const next = rollIdentity();
 
+    // ?limited=1 → the settings card's once-only reroll: enforce a single
+    // post-onboarding use (tracked by avatarRerolls) and increment it. Signup
+    // calls without the flag and stays unlimited.
+    const limited = c.req.query("limited") === "1";
+    if (limited) {
+        const me = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { avatarRerolls: true },
+        });
+        if ((me?.avatarRerolls ?? 0) >= 1) {
+            return c.json({ error: "No rerolls left.", code: "REROLL_LIMIT" }, 403);
+        }
+    }
+
     const updated = await prisma.user.update({
         where: { id: userId },
-        data: { animal: next.animal, avatarSeed: next.avatarSeed },
-        select: { animal: true, avatarSeed: true },
+        data: {
+            animal: next.animal,
+            avatarSeed: next.avatarSeed,
+            ...(limited ? { avatarRerolls: { increment: 1 } } : {}),
+        },
+        select: { animal: true, avatarSeed: true, avatarRerolls: true },
     });
 
     return c.json(updated);
+});
+
+// ─────────────────────────────────────────────────────────────
+// GET /users/me/egg-stats — the signed-in user's own egg ledger
+// rollup (SUM of eggs ordered + MAX order date), derived from the
+// EggOrder table exactly like the admin panel. Powers the "eggs
+// eaten" / "last order" rows on the settings ID card.
+// ─────────────────────────────────────────────────────────────
+users.get("/me/egg-stats", requireSignIn, async (c) => {
+    const userId = c.get("userId");
+    const agg = await prisma.eggOrder.aggregate({
+        where: { userId },
+        _sum: { eggs: true },
+        _max: { orderedAt: true },
+    });
+    return c.json({
+        eggsEaten: agg._sum.eggs ?? 0,
+        lastOrderAt: agg._max.orderedAt?.toISOString() ?? null,
+    });
 });
 
 // ─────────────────────────────────────────────────────────────

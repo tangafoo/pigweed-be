@@ -5,6 +5,8 @@ import { allowedOrigins } from './utils/env'
 import { auth } from './utils/auth'
 import { i18nMiddleware } from './middleware/i18n'
 import { coins } from './routes/coins'
+import { subscriptions } from './routes/subscriptions'
+import { admin } from './routes/admin'
 import { stripeWebhook } from './routes/stripe-webhook'
 import { posts } from './routes/posts'
 import { comments } from './routes/comments'
@@ -14,6 +16,7 @@ import { awards } from './routes/awards'
 import { media } from './routes/media'
 import { email } from './routes/email'
 import { achievements } from './routes/achievements'
+import { feedback } from './routes/feedback'
 import { registerAchievementListeners } from './utils/achievements'
 
 // Wire the achievement engine to the event bus at startup. After this
@@ -55,6 +58,8 @@ app.get('/favicon.ico', () => new Response(favicon, { headers: { 'content-type':
 app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw))
 
 app.route('/coins', coins)
+app.route('/subscriptions', subscriptions)
+app.route('/admin', admin)
 app.route('/stripe/webhook', stripeWebhook)
 app.route('/posts', posts)
 app.route('/', comments)
@@ -64,6 +69,7 @@ app.route('/', awards)
 app.route('/media', media)
 app.route('/email', email)
 app.route('/achievements', achievements)
+app.route('/feedback', feedback)
 
 const port = Number(process.env.PORT) || 3000
 
