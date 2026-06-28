@@ -154,10 +154,37 @@ export const SessionUser = z.object({
 	gender: Gender,
 	animal: Animal,
 	avatarSeed: z.number().int(),
+	/** Optional contact number (private to the owner). */
+	phoneNumber: z.string().nullable(),
+	/** Post-onboarding avatar rerolls used (settings card allows one). */
+	avatarRerolls: z.number().int(),
+	/** Early-subscriber flair badge. */
+	isFoundingFlock: z.boolean(),
+	/** Farm owner — "OP" flair. */
+	isFarmOwner: z.boolean(),
+	/** Admin-panel access (the boss). */
+	isAdmin: z.boolean(),
 	coinBalance: z.number().int(),
 	unlockCoins: z.number().int()
 });
 export type SessionUser = z.infer<typeof SessionUser>;
+
+/** The signed-in user's own egg-ledger rollup (GET /users/me/egg-stats). */
+export const MyEggStats = z.object({
+	eggsEaten: z.number().int().nonnegative(),
+	lastOrderAt: z.string().nullable()
+});
+export type MyEggStats = z.infer<typeof MyEggStats>;
+
+/** Contact / "egg feedback" form (POST /feedback). */
+export const FeedbackTopic = z.enum(['GENERAL', 'EMAIL_CHANGE', 'BUG', 'IDEA']);
+export type FeedbackTopic = z.infer<typeof FeedbackTopic>;
+export const FeedbackInput = z.object({
+	email: z.string().email(),
+	topic: FeedbackTopic.default('GENERAL'),
+	message: z.string().min(1).max(4000)
+});
+export type FeedbackInput = z.infer<typeof FeedbackInput>;
 
 export const Session = z.object({
 	user: SessionUser,
@@ -196,7 +223,11 @@ export const PublicProfile = z.object({
 	/** Non-deleted posts authored. */
 	postCount: z.number().int().nonnegative(),
 	/** Non-deleted comments authored. */
-	commentCount: z.number().int().nonnegative()
+	commentCount: z.number().int().nonnegative(),
+	/** Votes cast on posts (powers the Activity → Posts sub-tab count). */
+	postVoteCount: z.number().int().nonnegative(),
+	/** Votes cast on comments (powers the Activity → Comments sub-tab count). */
+	commentVoteCount: z.number().int().nonnegative()
 });
 export type PublicProfile = z.infer<typeof PublicProfile>;
 
@@ -436,6 +467,8 @@ export const AdminUserRow = z.object({
 	id: z.string(),
 	username: z.string(),
 	email: z.string(),
+	/** Optional contact number (private — admin only). */
+	phoneNumber: z.string().nullable(),
 	gender: Gender,
 	animal: Animal,
 	avatarSeed: z.number().int(),
@@ -448,6 +481,12 @@ export const AdminUserRow = z.object({
 	/** Posts that carry a star rating. */
 	reviewCount: z.number().int().nonnegative(),
 	commentCount: z.number().int().nonnegative(),
+	/** Spendable coin balance (for sorting). */
+	coinBalance: z.number().int().nonnegative(),
+	/** Lifetime eggs delivered (manually tracked by the admin). */
+	eggsEaten: z.number().int().nonnegative(),
+	/** ISO timestamp of the most recent order, or null. */
+	lastOrderAt: z.string().nullable(),
 	/** Their subscription, or null if never subscribed. */
 	subscription: SubscriptionSummary.nullable()
 });
@@ -466,7 +505,9 @@ export const AdminStats = z.object({
 	totalUsers: z.number().int().nonnegative(),
 	activeSubscribers: z.number().int().nonnegative(),
 	totalPosts: z.number().int().nonnegative(),
-	totalReviews: z.number().int().nonnegative()
+	totalReviews: z.number().int().nonnegative(),
+	/** Total eggs ordered across the whole flock (SUM of the order ledger). */
+	totalEggs: z.number().int().nonnegative()
 });
 export type AdminStats = z.infer<typeof AdminStats>;
 
@@ -495,6 +536,34 @@ export const AdminUserFlagsInput = z
 	);
 export type AdminUserFlagsInput = z.infer<typeof AdminUserFlagsInput>;
 
+/** Where an egg order came from. */
+export const EggOrderSource = z.enum(['MANUAL', 'SUBSCRIPTION']);
+export type EggOrderSource = z.infer<typeof EggOrderSource>;
+
+/** One row of a user's egg order ledger. */
+export const EggOrder = z.object({
+	id: z.string(),
+	eggs: z.number().int(),
+	/** ISO date the eggs were ordered/delivered. */
+	orderedAt: z.string(),
+	source: EggOrderSource
+});
+export type EggOrder = z.infer<typeof EggOrder>;
+
+/** POST /admin/users/:id/orders body — add one (manual) order record. */
+export const AdminOrderInput = z.object({
+	eggs: z.number().int().positive(),
+	/** ISO date; defaults to now if omitted. */
+	orderedAt: z.string().optional()
+});
+export type AdminOrderInput = z.infer<typeof AdminOrderInput>;
+
+/** GET /admin/users/:id/orders — a user's full order ledger, newest first. */
+export const AdminOrdersResponse = z.object({
+	orders: z.array(EggOrder)
+});
+export type AdminOrdersResponse = z.infer<typeof AdminOrdersResponse>;
+
 /** POST /admin/benefits and PATCH /admin/benefits/:id body. */
 export const BenefitInput = z.object({
 	label: z.string().min(1),
@@ -521,6 +590,27 @@ export const SetPlanBenefitsInput = z.object({
 	benefitIds: z.array(z.string())
 });
 export type SetPlanBenefitsInput = z.infer<typeof SetPlanBenefitsInput>;
+
+/** POST /admin/plans body — create a tier (priceCents defaults to RM2/egg). */
+export const AdminPlanCreateInput = z.object({
+	name: z.string().min(1),
+	eggsPerDelivery: z.number().int().positive(),
+	cadenceWeeks: z.number().int().min(1).max(4).optional(),
+	priceCents: z.number().int().nonnegative().optional(),
+	sortOrder: z.number().int().optional()
+});
+export type AdminPlanCreateInput = z.infer<typeof AdminPlanCreateInput>;
+
+/** PATCH /admin/plans/:id body — edit a tier's metadata (all fields optional). */
+export const AdminPlanPatchInput = z.object({
+	name: z.string().min(1).optional(),
+	eggsPerDelivery: z.number().int().positive().optional(),
+	cadenceWeeks: z.number().int().min(1).max(4).optional(),
+	priceCents: z.number().int().nonnegative().optional(),
+	sortOrder: z.number().int().optional(),
+	active: z.boolean().optional()
+});
+export type AdminPlanPatchInput = z.infer<typeof AdminPlanPatchInput>;
 
 /* ─── Achievements (incl. SSE payload) ────────────────────────────── */
 
