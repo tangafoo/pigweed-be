@@ -119,23 +119,71 @@ ${input.appUrl}/me`;
 // Backs auth.ts's magicLink sendMagicLink. The CLI onboarding script
 // (scripts/register-subscriber.ts) triggers this so an email-only customer
 // can log in with one click — no password to remember.
-export function magicLinkEmail(input: { url: string; username: string }): RenderedEmail {
-  const subject = "Your ourlittlefarm sign-in link";
+export function magicLinkEmail(input: {
+  url: string;
+  username: string;
+  /** The animal rolled for this user — included so the email also welcomes them. */
+  animal?: string;
+}): RenderedEmail {
+  const subject = "Welcome to ourlittlefarm! Your sign-in link";
+  const animal = input.animal ? escapeHtml(input.animal.toLowerCase()) : null;
+
+  // When we know their animal, the email doubles as a friendly welcome: here's
+  // your handle + the critter the farm review community rolled for you.
+  const identityLine = animal
+    ? paragraph(
+        `The farm review community assigned you a handle: <b>${escapeHtml(input.username)}</b> — one of the <b>${animal}</b>s 🥚 on our farm. You can reroll later in settings.`,
+      )
+    : "";
 
   const html = layout(
-    heading(`Sign in, ${input.username}`) +
+    heading(`An account was created for you, ${input.username}`) +
+      identityLine +
       paragraph(
         "Tap the button to sign in to ourlittlefarm. The link is single-use and expires shortly.",
       ) +
-      `<p style="margin:22px 0 0;">${button("Sign in to the farm", input.url)}</p>` +
+      `<p style="margin:22px 0 0;">${button("View latest happenings", input.url)}</p>` +
       paragraph(
         `<span style="font-size:13px;color:${colors.MUTED};">Didn't ask to sign in? You can safely ignore this email.</span>`,
       ),
     { preview: "Your single-use sign-in link for ourlittlefarm." },
   );
 
-  const text = `Sign in to ourlittlefarm, ${input.username}:\n${input.url}\n\nThe link is single-use and expires shortly. Didn't ask to sign in? Ignore this email.`;
+  const text = `An account was created for you on ourlittlefarm, ${input.username}:${
+    animal ? `\n\nThe farm review community assigned you a handle: ${input.username} — one of the ${animal}s on our farm. You can reroll later in settings.` : ""
+  }\n\n${input.url}\n\nThe link is single-use and expires shortly. Didn't ask to sign in? Ignore this email.`;
 
+  return { subject, html, text };
+}
+
+// ─── 3b. Contact / "egg feedback" form → the boss's inbox ──────────
+// Sent when a user submits the FE feedback form. Enriched with the
+// signed-in user (if any) so replies have context.
+export function feedbackEmail(input: {
+  fromEmail: string;
+  topic: string;
+  message: string;
+  username?: string;
+  userId?: string;
+}): RenderedEmail {
+  const subject = `[ourlittlefarm] ${input.topic} — feedback from ${input.fromEmail}`;
+  const meta = [
+    `From: ${escapeHtml(input.fromEmail)}`,
+    input.username ? `User: ${escapeHtml(input.username)}` : null,
+    input.userId ? `ID: ${escapeHtml(input.userId)}` : null,
+    `Topic: ${escapeHtml(input.topic)}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const html = layout(
+    heading("New feedback 🥚") +
+      paragraph(`<span style="font-size:13px;color:${colors.MUTED};">${meta}</span>`) +
+      paragraph(escapeHtml(input.message).replace(/\n/g, "<br>")),
+    { preview: `Feedback (${input.topic}) from ${input.fromEmail}` },
+  );
+
+  const text = `New feedback\n${meta}\n\n${input.message}`;
   return { subject, html, text };
 }
 

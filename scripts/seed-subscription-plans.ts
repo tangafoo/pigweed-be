@@ -16,7 +16,7 @@ const PRICE_PER_EGG_CENTS = 200; // RM2.00
 const TIERS: TierSeed[] = [
   { eggs: 120, cadenceWeeks: 1, sortOrder: 0, name: "120 Eggs / week" },
   { eggs: 60, cadenceWeeks: 1, sortOrder: 1, name: "60 Eggs / week" },
-  { eggs: 30, cadenceWeeks: 2, sortOrder: 2, name: "30 Eggs / fortnight" },
+  { eggs: 30, cadenceWeeks: 2, sortOrder: 2, name: "30 Eggs / biweekly" },
 ];
 
 async function main() {

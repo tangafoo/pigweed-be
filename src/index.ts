@@ -16,6 +16,7 @@ import { awards } from './routes/awards'
 import { media } from './routes/media'
 import { email } from './routes/email'
 import { achievements } from './routes/achievements'
+import { feedback } from './routes/feedback'
 import { registerAchievementListeners } from './utils/achievements'
 
 // Wire the achievement engine to the event bus at startup. After this
@@ -68,6 +69,7 @@ app.route('/', awards)
 app.route('/media', media)
 app.route('/email', email)
 app.route('/achievements', achievements)
+app.route('/feedback', feedback)
 
 const port = Number(process.env.PORT) || 3000
 

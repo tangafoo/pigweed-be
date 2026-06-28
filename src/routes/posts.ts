@@ -238,6 +238,14 @@ posts.get("/", optionalSignIn, async (c) => {
     Number.isInteger(minRatingNum) && minRatingNum >= 1 && minRatingNum <= 5
       ? minRatingNum
       : undefined;
+  // `maxRating` powers the /posts page's "N stars and below" filter (surfaces
+  // the critical reviews). Non-reviews (rating NULL) never match a <= bound, so
+  // they're naturally excluded when a max is set — the filter is about reviews.
+  const maxRatingNum = Number(c.req.query("maxRating"));
+  const maxRating =
+    Number.isInteger(maxRatingNum) && maxRatingNum >= 1 && maxRatingNum <= 5
+      ? maxRatingNum
+      : undefined;
 
   // Built once, applied to both code paths: a Prisma `where` object for the
   // findMany branch, and matching raw-SQL `AND` fragments for the geo branch.
@@ -247,6 +255,7 @@ posts.get("/", optionalSignIn, async (c) => {
   if (authorId) filterFragments.push(Prisma.sql`AND "authorId" = ${authorId}`);
   if (category) filterFragments.push(Prisma.sql`AND "category" = ${category}::"post_category"`);
   if (minRating != null) filterFragments.push(Prisma.sql`AND "rating" >= ${minRating}`);
+  if (maxRating != null) filterFragments.push(Prisma.sql`AND "rating" <= ${maxRating}`);
   const filterSql = filterFragments.length ? Prisma.join(filterFragments, " ") : Prisma.empty;
 
   // Sort mode. ?sort=rank → composite score (the "hot" feed). Anything
@@ -332,7 +341,14 @@ posts.get("/", optionalSignIn, async (c) => {
         deletedAt: null,
         ...(authorId ? { authorId } : {}),
         ...(category ? { category } : {}),
-        ...(minRating != null ? { rating: { gte: minRating } } : {}),
+        ...(minRating != null || maxRating != null
+          ? {
+              rating: {
+                ...(minRating != null ? { gte: minRating } : {}),
+                ...(maxRating != null ? { lte: maxRating } : {}),
+              },
+            }
+          : {}),
       },
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * limit,
