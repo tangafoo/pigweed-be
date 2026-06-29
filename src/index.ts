@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { logger } from 'hono/logger'
 import { cors } from 'hono/cors'
-import { allowedOrigins } from './utils/env'
+import { allowedOrigins, assertWebEnv } from './utils/env'
 import { auth } from './utils/auth'
 import { i18nMiddleware } from './middleware/i18n'
 import { coins } from './routes/coins'
@@ -18,6 +18,10 @@ import { email } from './routes/email'
 import { achievements } from './routes/achievements'
 import { feedback } from './routes/feedback'
 import { registerAchievementListeners } from './utils/achievements'
+
+// Fail fast if the API server is missing its web-only secrets (auth/Stripe).
+// The cron jobs never import this file, so they boot without them.
+assertWebEnv()
 
 // Wire the achievement engine to the event bus at startup. After this
 // runs, action handlers can emit domain events and the engine reacts.

@@ -10,13 +10,17 @@ import { z } from "zod";
 // see the whole contract; (3) cross-field rules (the R2 "all-5-or-none"
 // group) are declarative instead of an `&&` chain.
 //
-// Required vs optional mirrors real boot semantics: the app genuinely
-// can't run without DATABASE_URL / BETTER_AUTH_SECRET / STRIPE_SECRET_KEY,
-// so those are required. REDIS_URL and the R2 group are OPTIONAL by design
-// — the bus falls back to in-process and uploads return 503 — so they stay
-// optional here too. (BETTER_AUTH_SECRET / BETTER_AUTH_URL are also read
-// directly by the Better Auth library from process.env; we validate them
-// without taking over that read.)
+// Multi-service note: every service (the API server AND the cron jobs:
+// digest / subscription-deliveries / backup) runs THIS repo, and anything
+// touching Prisma imports utils/db → this file. So the ONLY var required at
+// import is DATABASE_URL — the one thing all of them genuinely need. The
+// web-only secrets (BETTER_AUTH_SECRET, STRIPE_SECRET_KEY) are OPTIONAL in
+// the schema and enforced separately by assertWebEnv(), called ONLY from the
+// API server's entrypoint (src/index.ts). That keeps the cron services at
+// least-privilege — they boot on just the handful of vars they actually use
+// and never carry auth/Stripe keys. REDIS_URL and the R2 group stay optional
+// (bus falls back to in-process; uploads 503). assertWebEnv keeps the API
+// server's fail-fast.
 // ─────────────────────────────────────────────────────────────
 
 const R2_KEYS = [
@@ -39,14 +43,19 @@ const schema = z
     DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
     DIRECT_URL: z.string().optional(),
 
-    BETTER_AUTH_SECRET: z.string().min(1, "BETTER_AUTH_SECRET is required"),
+    // Web-only secret — OPTIONAL here so cron jobs boot without it; enforced
+    // for the API server by assertWebEnv(). (Better Auth also reads it directly
+    // from process.env on the web service.)
+    BETTER_AUTH_SECRET: z.string().optional(),
     BETTER_AUTH_URL: z.string().default("http://localhost:3000"),
 
     PASSKEY_RP_ID: z.string().default("localhost"),
     PASSKEY_RP_NAME: z.string().default("ourlittlefarm"),
     PASSKEY_ORIGIN: z.string().default("http://localhost:5173"),
 
-    STRIPE_SECRET_KEY: z.string().min(1, "STRIPE_SECRET_KEY is required"),
+    // Web-only — OPTIONAL here, enforced by assertWebEnv(). Stripe code paths
+    // (utils/stripe.ts) are imported only by the API server, never the crons.
+    STRIPE_SECRET_KEY: z.string().optional(),
     STRIPE_WEBHOOK_SECRET: z.string().default(""),
 
     // Moderation fails OPEN without this — optional on purpose.
@@ -58,6 +67,12 @@ const schema = z
     // EMAIL_FROM is the verified sender on the ourlittlefarm.club domain.
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().default("ourlittlefarm <no-reply@ourlittlefarm.club>"),
+
+    // Secret that signs one-click unsubscribe links (HMAC). Kept SEPARATE from
+    // BETTER_AUTH_SECRET so the digest cron can sign links WITHOUT carrying the
+    // auth secret. Falls back to BETTER_AUTH_SECRET if unset (back-compat for
+    // single-secret deploys). Set the SAME value on the web + digest services.
+    EMAIL_TOKEN_SECRET: z.string().optional(),
 
     // Absolute URL of the brand logo shown in every email header. Must be a
     // publicly-reachable raster (PNG/JPEG) — email clients fetch it over HTTP
@@ -119,6 +134,30 @@ export function isProd(): boolean {
   return env.NODE_ENV === "production";
 }
 
+// Boot-time guard for the API SERVER only (called from src/index.ts) — NOT by
+// the cron jobs, so they boot at least-privilege. Keeps the web server's
+// fail-fast: a missing auth/Stripe secret stops it cleanly at boot with a
+// clear message instead of a lazy mid-request throw.
+export function assertWebEnv(): void {
+  const missing: string[] = [];
+  if (!env.BETTER_AUTH_SECRET) missing.push("BETTER_AUTH_SECRET");
+  if (!env.STRIPE_SECRET_KEY) missing.push("STRIPE_SECRET_KEY");
+  if (missing.length > 0) {
+    process.stderr.write(
+      `❌ [env] API server is missing required vars: ${missing.join(", ")}. ` +
+        `Set them on the web service, then redeploy.\n`,
+    );
+    process.exit(1);
+  }
+}
+
+// Secret for unsubscribe-link HMACs. Prefers the dedicated EMAIL_TOKEN_SECRET;
+// falls back to BETTER_AUTH_SECRET so single-secret deploys keep working. Set
+// EMAIL_TOKEN_SECRET on web + digest to keep BETTER_AUTH_SECRET off the crons.
+export function emailTokenSecret(): string {
+  return env.EMAIL_TOKEN_SECRET || env.BETTER_AUTH_SECRET || "";
+}
+
 // Browser origins allowed to make credentialed requests. Drives BOTH the
 // CORS middleware and Better Auth's trustedOrigins (CSRF allow-list), so
 // they can never disagree.
@@ -162,6 +201,9 @@ export function passkeyOrigin(): string {
 }
 
 export function stripeSecretKey(): string {
+  // Optional in the schema (cron jobs don't need it); this accessor lives on
+  // web-only code paths, so a missing value here is a real misconfiguration.
+  if (!env.STRIPE_SECRET_KEY) throw new Error("STRIPE_SECRET_KEY is not set");
   return env.STRIPE_SECRET_KEY;
 }
 

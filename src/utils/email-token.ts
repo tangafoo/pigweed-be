@@ -1,21 +1,20 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { betterAuthUrl } from "./env";
+import { betterAuthUrl, emailTokenSecret } from "./env";
 
 // ─────────────────────────────────────────────────────────────
 // UNSUBSCRIBE TOKENS — stateless, signed one-click opt-out links.
 //
 // The digest footer needs a link that turns digests off for exactly one
 // user, can't be forged into "unsubscribe someone else," and needs no DB
-// table to track. So: HMAC the userId with BETTER_AUTH_SECRET. The link
-// carries (userId, token); the endpoint recomputes the HMAC and compares
-// in constant time. No expiry — an unsubscribe link staying valid is a
-// feature, not a risk (worst case: the user unsubscribes themselves).
+// table to track. So: HMAC the userId with EMAIL_TOKEN_SECRET (a dedicated
+// secret so the digest cron can sign links without holding BETTER_AUTH_SECRET;
+// falls back to it for single-secret deploys). The link carries (userId,
+// token); the endpoint recomputes the HMAC and compares in constant time. No
+// expiry — a valid unsubscribe link is a feature, not a risk.
 // ─────────────────────────────────────────────────────────────
 
 function secret(): string {
-  // Validated present at boot by utils/env.ts's schema; read directly here
-  // (Better Auth owns the canonical read, we just reuse the value).
-  return process.env.BETTER_AUTH_SECRET ?? "";
+  return emailTokenSecret();
 }
 
 export function unsubscribeToken(userId: string): string {
