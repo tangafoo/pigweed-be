@@ -254,7 +254,7 @@ users.post("/me/avatar/reroll", requireSignIn, async (c) => {
 users.get("/me/egg-stats", requireSignIn, async (c) => {
     const userId = c.get("userId");
     const agg = await prisma.eggOrder.aggregate({
-        where: { userId },
+        where: { userId, deletedAt: null },
         _sum: { eggs: true },
         _max: { orderedAt: true },
     });

@@ -7,10 +7,10 @@ import { Animal } from "../generated/prisma/client";
 // into palette/pattern picks. 31-bit so it fits comfortably in a Postgres
 // Int column and a JS Number.
 //
-// Animal pool is intentionally small at launch (CHICKEN, DOG, GOOSE).
-// Adding more = enum migration + new SVG drawings on the FE.
+// Animal pool: each has a default profile icon in the FE assets bucket
+// (<animal>-user-icon.webp). Adding more = enum migration + a new icon in R2.
 
-const ANIMAL_POOL: Animal[] = ["CHICKEN", "DOG", "GOOSE"];
+const ANIMAL_POOL: Animal[] = ["CHICKEN", "DOG", "GOOSE", "DUCK", "CAT", "LIZARD"];
 const SEED_MAX = 2 ** 31;
 
 export function rollIdentity(): { animal: Animal; avatarSeed: number } {

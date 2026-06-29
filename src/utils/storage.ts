@@ -1,4 +1,9 @@
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  ListObjectsV2Command,
+  DeleteObjectCommand,
+} from "@aws-sdk/client-s3";
 import { r2Config } from "./env";
 
 // ─────────────────────────────────────────────────────────────
@@ -56,4 +61,35 @@ export async function putObject(
   );
 
   return `${cfg.publicBaseUrl}/${key}`;
+}
+
+// List objects under a key prefix (paginates internally). Returns each object's
+// key + last-modified date. Used by the backup job to find old dumps to prune.
+export async function listObjects(
+  prefix: string,
+): Promise<{ key: string; lastModified: Date }[]> {
+  const cfg = r2Config();
+  const c = getClient();
+  if (!cfg || !c) throw new Error("R2 storage is not configured");
+
+  const out: { key: string; lastModified: Date }[] = [];
+  let token: string | undefined;
+  do {
+    const res = await c.send(
+      new ListObjectsV2Command({ Bucket: cfg.bucket, Prefix: prefix, ContinuationToken: token }),
+    );
+    for (const o of res.Contents ?? []) {
+      if (o.Key) out.push({ key: o.Key, lastModified: o.LastModified ?? new Date(0) });
+    }
+    token = res.IsTruncated ? res.NextContinuationToken : undefined;
+  } while (token);
+  return out;
+}
+
+// Delete a single object by key.
+export async function deleteObject(key: string): Promise<void> {
+  const cfg = r2Config();
+  const c = getClient();
+  if (!cfg || !c) throw new Error("R2 storage is not configured");
+  await c.send(new DeleteObjectCommand({ Bucket: cfg.bucket, Key: key }));
 }

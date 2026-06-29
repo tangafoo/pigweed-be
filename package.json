@@ -24,6 +24,7 @@
     "stripe:listen": "stripe listen --forward-to localhost:3000/stripe/webhook",
     "jobs:digest": "bun src/jobs/send-digests.ts",
     "jobs:subscription-deliveries": "bun src/jobs/subscription-deliveries.ts",
+    "jobs:backup": "bun src/jobs/backup-db.ts",
     "backfill:achievements": "bun scripts/backfill-achievements.ts",
     "typecheck": "bunx tsc --noEmit",
     "test": "bun test"
