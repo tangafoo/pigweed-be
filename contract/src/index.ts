@@ -18,7 +18,7 @@ import { z } from 'zod';
 
 /* ─── Enums (mirror prisma/schema.prisma) ─────────────────────────── */
 
-export const Animal = z.enum(['CHICKEN', 'DOG', 'GOOSE']);
+export const Animal = z.enum(['CHICKEN', 'DOG', 'GOOSE', 'DUCK', 'CAT', 'LIZARD']);
 export type Animal = z.infer<typeof Animal>;
 
 export const Gender = z.enum(['MALE', 'FEMALE', 'NONBINARY', 'UNDISCLOSED']);
@@ -544,15 +544,21 @@ export type EggOrderSource = z.infer<typeof EggOrderSource>;
 export const EggOrder = z.object({
 	id: z.string(),
 	eggs: z.number().int(),
+	/** Price per egg at order time, in cents (RM2 = 200). Revenue = eggs * this. */
+	unitPriceCents: z.number().int(),
 	/** ISO date the eggs were ordered/delivered. */
 	orderedAt: z.string(),
-	source: EggOrderSource
+	source: EggOrderSource,
+	/** ISO timestamp if soft-deleted, else null. Restorable by the admin. */
+	deletedAt: z.string().nullable()
 });
 export type EggOrder = z.infer<typeof EggOrder>;
 
 /** POST /admin/users/:id/orders body — add one (manual) order record. */
 export const AdminOrderInput = z.object({
 	eggs: z.number().int().positive(),
+	/** Price per egg in cents; defaults to 200 (RM2) if omitted. */
+	unitPriceCents: z.number().int().positive().optional(),
 	/** ISO date; defaults to now if omitted. */
 	orderedAt: z.string().optional()
 });
@@ -563,6 +569,35 @@ export const AdminOrdersResponse = z.object({
 	orders: z.array(EggOrder)
 });
 export type AdminOrdersResponse = z.infer<typeof AdminOrdersResponse>;
+
+/** One row of the global egg ledger (GET /admin/orders) — an EggOrder joined
+ *  with its customer, for the accounting-style panel across all users. */
+export const AdminEggLedgerRow = EggOrder.extend({
+	userId: z.string(),
+	username: z.string(),
+	animal: Animal,
+	avatarSeed: z.number().int(),
+	gender: Gender
+});
+export type AdminEggLedgerRow = z.infer<typeof AdminEggLedgerRow>;
+
+/** Aggregate totals over the filtered ledger set. */
+export const AdminEggLedgerTotals = z.object({
+	eggs: z.number().int().nonnegative(),
+	revenueCents: z.number().int().nonnegative(),
+	orderCount: z.number().int().nonnegative()
+});
+export type AdminEggLedgerTotals = z.infer<typeof AdminEggLedgerTotals>;
+
+/** GET /admin/orders — paginated global ledger + totals over the whole filter. */
+export const AdminEggLedgerResponse = z.object({
+	rows: z.array(AdminEggLedgerRow),
+	page: z.number().int(),
+	limit: z.number().int(),
+	total: z.number().int().nonnegative(),
+	totals: AdminEggLedgerTotals
+});
+export type AdminEggLedgerResponse = z.infer<typeof AdminEggLedgerResponse>;
 
 /** POST /admin/benefits and PATCH /admin/benefits/:id body. */
 export const BenefitInput = z.object({

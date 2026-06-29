@@ -24,6 +24,9 @@ enum Animal {
   CHICKEN
   DOG
   GOOSE
+  DUCK
+  CAT
+  LIZARD
 
   @@map("animal")
 }
@@ -149,15 +152,24 @@ enum EggOrderSource {
 }
 
 model EggOrder {
-  id        String         @id @default(cuid())
-  userId    String
-  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  eggs      Int
-  orderedAt DateTime       @default(now())
-  source    EggOrderSource @default(MANUAL)
-  createdAt DateTime       @default(now())
+  id             String         @id @default(cuid())
+  userId         String
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eggs           Int
+  // Price per egg at the time of the order (RM2 = 200 cents default). Revenue
+  // for a row is eggs * unitPriceCents — captured per-order so price changes /
+  // discounts don't rewrite history (accurate accounting + RAG signal).
+  unitPriceCents Int            @default(200)
+  orderedAt      DateTime       @default(now())
+  source         EggOrderSource @default(MANUAL)
+  // Soft delete — null means live. Deletes are recoverable (admin can restore);
+  // every read filters deletedAt: null so totals/ledgers exclude removed rows.
+  deletedAt      DateTime?
+  createdAt      DateTime       @default(now())
 
   @@index([userId, orderedAt])
+  // Global ledger sorts/filters by date across all users.
+  @@index([orderedAt])
   @@map("egg_order")
 }
 
