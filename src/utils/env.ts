@@ -171,6 +171,25 @@ export function databaseUrl(): string {
   return env.DATABASE_URL;
 }
 
+// The connection string `pg_dump` should use (backup job). DATABASE_URL is the
+// Supabase TRANSACTION pooler (:6543 + ?pgbouncer=true) — pg_dump can't use it:
+// libpq rejects the `pgbouncer` param, and a transaction pooler can't give a
+// consistent dump snapshot. So we derive the SESSION pooler from it: same host,
+// port 6543→5432, drop the Prisma-only query params. We intentionally do NOT
+// fall back to DIRECT_URL — Supabase's direct host is IPv6-only and Railway is
+// IPv4, so the derived (IPv4) session pooler is the only thing that connects.
+export function ipv4DatabaseUrl(): string {
+  try {
+    const u = new URL(env.DATABASE_URL);
+    u.searchParams.delete("pgbouncer");
+    u.searchParams.delete("connection_limit");
+    if (u.port === "6543") u.port = "5432"; // transaction pooler → session pooler
+    return u.toString();
+  } catch {
+    return env.DATABASE_URL;
+  }
+}
+
 // Public FE base URL — where email "Open the farm" buttons point. The FE
 // is the first CORS origin (prod: https://ourlittlefarm.club). Falls back
 // to the prod domain if CORS_ORIGIN is somehow empty.

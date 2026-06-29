@@ -1,7 +1,8 @@
 // ─────────────────────────────────────────────────────────────
 // DB BACKUP JOB — standalone script, run by Railway cron (NOT the web
 // process). Every 3 days it:
-//   1. runs `pg_dump` on DATABASE_URL (custom format, compressed),
+//   1. runs `pg_dump` on the SESSION-pooler URL (ipv4DatabaseUrl(), derived
+//      from DATABASE_URL — the transaction pooler can't serve pg_dump),
 //   2. uploads the dump to R2 under backups/olf-<ISO>.dump,
 //   3. prunes dumps older than RETENTION_DAYS.
 //
@@ -16,7 +17,7 @@
 // Restore a dump with:  pg_restore --clean --if-exists -d "$DATABASE_URL" olf-….dump
 // ─────────────────────────────────────────────────────────────
 
-import { databaseUrl } from "../utils/env";
+import { ipv4DatabaseUrl } from "../utils/env";
 import { isStorageConfigured, putObject, listObjects, deleteObject } from "../utils/storage";
 
 const PREFIX = "backups/";
@@ -33,7 +34,7 @@ async function main() {
 
   // `pg_dump -Fc` = custom format (compressed, restorable with pg_restore).
   console.log(`[backup] running pg_dump → ${key}`);
-  const proc = Bun.spawn(["pg_dump", "-Fc", "--no-owner", "--no-acl", databaseUrl()], {
+  const proc = Bun.spawn(["pg_dump", "-Fc", "--no-owner", "--no-acl", ipv4DatabaseUrl()], {
     stdout: "pipe",
     stderr: "pipe",
   });
