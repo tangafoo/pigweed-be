@@ -39,13 +39,15 @@ export function isStorageConfigured(): boolean {
   return r2Config() !== null;
 }
 
-// Upload bytes under `key` and return the public URL to read them back.
-// Throws if R2 isn't configured (guard with isStorageConfigured first) or
-// the PUT fails.
+// Upload bytes under `key` and return the public URL to read them back. Pass
+// `bucket` to target a non-default bucket (e.g. the private backup bucket) —
+// the returned URL is only meaningful for the public assets bucket. Throws if
+// R2 isn't configured (guard with isStorageConfigured first) or the PUT fails.
 export async function putObject(
   key: string,
   body: Uint8Array,
   contentType: string,
+  bucket?: string,
 ): Promise<string> {
   const cfg = r2Config();
   const c = getClient();
@@ -53,7 +55,7 @@ export async function putObject(
 
   await c.send(
     new PutObjectCommand({
-      Bucket: cfg.bucket,
+      Bucket: bucket ?? cfg.bucket,
       Key: key,
       Body: body,
       ContentType: contentType,
@@ -67,6 +69,7 @@ export async function putObject(
 // key + last-modified date. Used by the backup job to find old dumps to prune.
 export async function listObjects(
   prefix: string,
+  bucket?: string,
 ): Promise<{ key: string; lastModified: Date }[]> {
   const cfg = r2Config();
   const c = getClient();
@@ -76,7 +79,11 @@ export async function listObjects(
   let token: string | undefined;
   do {
     const res = await c.send(
-      new ListObjectsV2Command({ Bucket: cfg.bucket, Prefix: prefix, ContinuationToken: token }),
+      new ListObjectsV2Command({
+        Bucket: bucket ?? cfg.bucket,
+        Prefix: prefix,
+        ContinuationToken: token,
+      }),
     );
     for (const o of res.Contents ?? []) {
       if (o.Key) out.push({ key: o.Key, lastModified: o.LastModified ?? new Date(0) });
@@ -86,10 +93,10 @@ export async function listObjects(
   return out;
 }
 
-// Delete a single object by key.
-export async function deleteObject(key: string): Promise<void> {
+// Delete a single object by key. Pass `bucket` to target a non-default bucket.
+export async function deleteObject(key: string, bucket?: string): Promise<void> {
   const cfg = r2Config();
   const c = getClient();
   if (!cfg || !c) throw new Error("R2 storage is not configured");
-  await c.send(new DeleteObjectCommand({ Bucket: cfg.bucket, Key: key }));
+  await c.send(new DeleteObjectCommand({ Bucket: bucket ?? cfg.bucket, Key: key }));
 }

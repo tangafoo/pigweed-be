@@ -17,7 +17,7 @@
 // Restore a dump with:  pg_restore --clean --if-exists -d "$DATABASE_URL" olf-….dump
 // ─────────────────────────────────────────────────────────────
 
-import { ipv4DatabaseUrl } from "../utils/env";
+import { ipv4DatabaseUrl, backupBucket } from "../utils/env";
 import { isStorageConfigured, putObject, listObjects, deleteObject } from "../utils/storage";
 
 const PREFIX = "backups/";
@@ -26,6 +26,13 @@ const RETENTION_DAYS = 30;
 async function main() {
   if (!isStorageConfigured()) {
     console.error("[backup] R2 is not configured — aborting (no destination for the dump).");
+    process.exit(1);
+  }
+
+  // Dumps go to the PRIVATE backup bucket, never the public assets bucket.
+  const bucket = backupBucket();
+  if (!bucket) {
+    console.error("[backup] no backup bucket configured (set R2_BACKUP_BUCKET) — aborting.");
     process.exit(1);
   }
 
@@ -52,15 +59,15 @@ async function main() {
     process.exit(1);
   }
 
-  await putObject(key, new Uint8Array(dump), "application/octet-stream");
-  console.log(`[backup] uploaded ${(dump.byteLength / 1024 / 1024).toFixed(2)} MB → ${key}`);
+  await putObject(key, new Uint8Array(dump), "application/octet-stream", bucket);
+  console.log(`[backup] uploaded ${(dump.byteLength / 1024 / 1024).toFixed(2)} MB → ${bucket}/${key}`);
 
   // Prune dumps older than the retention window.
   const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
-  const existing = await listObjects(PREFIX);
+  const existing = await listObjects(PREFIX, bucket);
   const stale = existing.filter((o) => o.lastModified.getTime() < cutoff);
   for (const o of stale) {
-    await deleteObject(o.key);
+    await deleteObject(o.key, bucket);
     console.log(`[backup] pruned old dump ${o.key}`);
   }
   console.log(`[backup] done — ${existing.length - stale.length + 1} dump(s) retained.`);

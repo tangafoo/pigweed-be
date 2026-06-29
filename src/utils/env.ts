@@ -95,6 +95,12 @@ const schema = z
     R2_SECRET_ACCESS_KEY: z.string().optional(),
     R2_BUCKET: z.string().optional(),
     R2_PUBLIC_BASE_URL: z.string().optional(),
+
+    // Separate PRIVATE bucket for DB backups (no public domain). Falls back to
+    // R2_BUCKET if unset, but DON'T do that in prod — the assets bucket is
+    // public, and a DB dump must never be publicly downloadable. Set this on
+    // the backup service only. Uses the same R2 account creds as R2_*.
+    R2_BACKUP_BUCKET: z.string().optional(),
   })
   .superRefine((env, ctx) => {
     // "These five travel together." Partial R2 config is almost always a
@@ -169,6 +175,13 @@ export function allowedOrigins(): string[] {
 
 export function databaseUrl(): string {
   return env.DATABASE_URL;
+}
+
+// The PRIVATE bucket DB dumps are written to (backup job). Falls back to the
+// public R2_BUCKET if unset — fine for local dev, NOT for prod (dumps would be
+// publicly downloadable). Returns undefined only if neither is set.
+export function backupBucket(): string | undefined {
+  return env.R2_BACKUP_BUCKET || env.R2_BUCKET;
 }
 
 // The connection string `pg_dump` should use (backup job). DATABASE_URL is the
