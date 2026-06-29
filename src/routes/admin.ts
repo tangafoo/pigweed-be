@@ -66,7 +66,7 @@ admin.get("/users", async (c) => {
     const start = new Date(`${orderedOn}T00:00:00.000Z`);
     if (!Number.isNaN(start.getTime())) {
       const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-      where.eggOrders = { some: { orderedAt: { gte: start, lt: end } } };
+      where.eggOrders = { some: { orderedAt: { gte: start, lt: end }, deletedAt: null } };
     }
   }
 
@@ -101,8 +101,9 @@ admin.get("/users", async (c) => {
     prisma.post.groupBy({ by: ["authorId"], where: { authorId: { in: ids }, deletedAt: null }, _count: true }),
     prisma.post.groupBy({ by: ["authorId"], where: { authorId: { in: ids }, deletedAt: null, rating: { not: null } }, _count: true }),
     prisma.comment.groupBy({ by: ["authorId"], where: { authorId: { in: ids }, deletedAt: null }, _count: true }),
-    // eggsEaten + lastOrderAt are derived from the order ledger (SUM / MAX).
-    prisma.eggOrder.groupBy({ by: ["userId"], where: { userId: { in: ids } }, _sum: { eggs: true }, _max: { orderedAt: true } }),
+    // eggsEaten + lastOrderAt are derived from the order ledger (SUM / MAX),
+    // excluding soft-deleted rows.
+    prisma.eggOrder.groupBy({ by: ["userId"], where: { userId: { in: ids }, deletedAt: null }, _sum: { eggs: true }, _max: { orderedAt: true } }),
   ]);
   const postMap = new Map(postCounts.map((r) => [r.authorId, r._count]));
   const reviewMap = new Map(reviewCounts.map((r) => [r.authorId, r._count]));
@@ -224,30 +225,48 @@ admin.post("/users/:id/resume", async (c) => {
 });
 
 // ─── Egg order ledger (manual records) ─────────────────────────────
-// A user's full order history, newest first (powers the expand card).
+// Shape an EggOrder row for the wire (per-user ledger + global ledger share it).
+function orderSummary(o: {
+  id: string;
+  eggs: number;
+  unitPriceCents: number;
+  orderedAt: Date;
+  source: string;
+  deletedAt: Date | null;
+}) {
+  return {
+    id: o.id,
+    eggs: o.eggs,
+    unitPriceCents: o.unitPriceCents,
+    orderedAt: o.orderedAt.toISOString(),
+    source: o.source,
+    deletedAt: o.deletedAt ? o.deletedAt.toISOString() : null,
+  };
+}
+
+// A user's full (live) order history, newest first (powers the expand card).
 admin.get("/users/:id/orders", async (c) => {
   const userId = c.req.param("id");
   const orders = await prisma.eggOrder.findMany({
-    where: { userId },
+    where: { userId, deletedAt: null },
     orderBy: { orderedAt: "desc" },
-    select: { id: true, eggs: true, orderedAt: true, source: true },
+    select: { id: true, eggs: true, unitPriceCents: true, orderedAt: true, source: true, deletedAt: true },
   });
-  return c.json({
-    orders: orders.map((o) => ({
-      id: o.id,
-      eggs: o.eggs,
-      orderedAt: o.orderedAt.toISOString(),
-      source: o.source,
-    })),
-  });
+  return c.json({ orders: orders.map(orderSummary) });
 });
 
-// Add one manual order record ("Jessica · 50 eggs · 16 Jun").
+// Add one manual order record ("Jessica · 50 eggs · 16 Jun"). unitPriceCents
+// defaults to RM2/egg.
 admin.post("/users/:id/orders", async (c) => {
   const userId = c.req.param("id");
   const body = await c.req.json().catch(() => null);
   const eggs = body?.eggs;
   if (typeof eggs !== "number" || eggs <= 0) return c.json({ error: "eggs must be > 0" }, 400);
+
+  const unitPriceCents =
+    typeof body?.unitPriceCents === "number" && body.unitPriceCents > 0
+      ? Math.floor(body.unitPriceCents)
+      : 200;
 
   let orderedAt = new Date();
   if (typeof body?.orderedAt === "string") {
@@ -259,18 +278,168 @@ admin.post("/users/:id/orders", async (c) => {
   if (!user) return c.json({ error: "user not found" }, 404);
 
   await prisma.eggOrder.create({
-    data: { id: makeId(ID_PREFIX.EGG_ORDER), userId, eggs: Math.floor(eggs), orderedAt, source: "MANUAL" },
+    data: { id: makeId(ID_PREFIX.EGG_ORDER), userId, eggs: Math.floor(eggs), unitPriceCents, orderedAt, source: "MANUAL" },
   });
-  console.log(`[admin] order recorded: ${userId} +${eggs} eggs @ ${orderedAt.toISOString()}`);
+  console.log(`[admin] order recorded: ${userId} +${eggs} eggs @ RM${unitPriceCents / 100}/egg @ ${orderedAt.toISOString()}`);
   return c.json({ ok: true }, 201);
 });
 
-// Remove a single order record.
+// ─── Global egg ledger (accounting view across all customers) ───────
+// Paginated, filterable (date range / source / customer text), with
+// aggregate totals over the WHOLE filtered set (not just the page).
+function ledgerWhere(c: { req: { query: (k: string) => string | undefined } }) {
+  const where: Record<string, unknown> = {};
+  const from = c.req.query("from");
+  const to = c.req.query("to");
+  const orderedAt: Record<string, Date> = {};
+  if (from) {
+    const d = new Date(`${from}T00:00:00.000Z`);
+    if (!Number.isNaN(d.getTime())) orderedAt.gte = d;
+  }
+  if (to) {
+    const d = new Date(`${to}T00:00:00.000Z`);
+    if (!Number.isNaN(d.getTime())) orderedAt.lt = new Date(d.getTime() + 24 * 60 * 60 * 1000);
+  }
+  if (Object.keys(orderedAt).length) where.orderedAt = orderedAt;
+
+  const source = c.req.query("source");
+  if (source === "MANUAL" || source === "SUBSCRIPTION") where.source = source;
+
+  // includeDeleted=1 shows soft-deleted rows too (the restore view).
+  if (c.req.query("includeDeleted") !== "1") where.deletedAt = null;
+
+  const q = c.req.query("q")?.trim();
+  if (q) {
+    where.user = {
+      OR: [
+        { username: { contains: q, mode: "insensitive" as const } },
+        { email: { contains: q, mode: "insensitive" as const } },
+      ],
+    };
+  }
+  return where;
+}
+
+admin.get("/orders", async (c) => {
+  const page = Math.max(1, Number(c.req.query("page") ?? 1));
+  const limit = Math.min(200, Math.max(1, Number(c.req.query("limit") ?? 50)));
+  const where = ledgerWhere(c);
+
+  const [total, rows, agg] = await Promise.all([
+    prisma.eggOrder.count({ where }),
+    prisma.eggOrder.findMany({
+      where,
+      orderBy: { orderedAt: "desc" },
+      skip: (page - 1) * limit,
+      take: limit,
+      select: {
+        id: true,
+        eggs: true,
+        unitPriceCents: true,
+        orderedAt: true,
+        source: true,
+        deletedAt: true,
+        user: { select: { id: true, username: true, animal: true, avatarSeed: true, gender: true } },
+      },
+    }),
+    // Revenue = SUM(eggs * unitPriceCents). Prisma can't multiply two columns in
+    // aggregate, so we sum eggs and (eggs*price) via groupBy-less raw-light pass:
+    // fetch the lightweight pairs for the filtered set and reduce in JS. The
+    // base is small (one farm), so this stays cheap; revisit if it grows.
+    prisma.eggOrder.findMany({ where, select: { eggs: true, unitPriceCents: true } }),
+  ]);
+
+  const totals = agg.reduce(
+    (acc, o) => {
+      acc.eggs += o.eggs;
+      acc.revenueCents += o.eggs * o.unitPriceCents;
+      acc.orderCount += 1;
+      return acc;
+    },
+    { eggs: 0, revenueCents: 0, orderCount: 0 },
+  );
+
+  return c.json({
+    rows: rows.map((o) => ({
+      ...orderSummary(o),
+      userId: o.user.id,
+      username: o.user.username,
+      animal: o.user.animal,
+      avatarSeed: o.user.avatarSeed,
+      gender: o.user.gender,
+    })),
+    page,
+    limit,
+    total,
+    totals,
+  });
+});
+
+// CSV export of the filtered ledger — doubles as the RAG corpus + a data backup.
+admin.get("/orders/export.csv", async (c) => {
+  const where = ledgerWhere(c);
+  const rows = await prisma.eggOrder.findMany({
+    where,
+    orderBy: { orderedAt: "desc" },
+    select: {
+      id: true,
+      eggs: true,
+      unitPriceCents: true,
+      orderedAt: true,
+      source: true,
+      deletedAt: true,
+      user: { select: { username: true, email: true } },
+    },
+  });
+
+  // Minimal CSV escaping (wrap + double any quotes).
+  const esc = (v: string | number) => {
+    const s = String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = ["date", "customer", "email", "eggs", "boxes", "unitPriceRM", "lineTotalRM", "source", "status"];
+  const lines = rows.map((o) =>
+    [
+      o.orderedAt.toISOString().slice(0, 10),
+      o.user.username,
+      o.user.email,
+      o.eggs,
+      (o.eggs / 30).toFixed(2),
+      (o.unitPriceCents / 100).toFixed(2),
+      ((o.eggs * o.unitPriceCents) / 100).toFixed(2),
+      o.source,
+      o.deletedAt ? "deleted" : "live",
+    ]
+      .map(esc)
+      .join(","),
+  );
+  const csv = [header.join(","), ...lines].join("\n");
+  const stamp = new Date().toISOString().slice(0, 10);
+  return new Response(csv, {
+    headers: {
+      "content-type": "text/csv; charset=utf-8",
+      "content-disposition": `attachment; filename="egg-ledger-${stamp}.csv"`,
+    },
+  });
+});
+
+// Soft-delete a single order record (recoverable via restore).
 admin.delete("/orders/:orderId", async (c) => {
   const orderId = c.req.param("orderId");
   const existing = await prisma.eggOrder.findUnique({ where: { id: orderId }, select: { id: true } });
   if (!existing) return c.json({ error: "order not found" }, 404);
-  await prisma.eggOrder.delete({ where: { id: orderId } });
+  await prisma.eggOrder.update({ where: { id: orderId }, data: { deletedAt: new Date() } });
+  console.log(`[admin] order soft-deleted ${orderId}`);
+  return c.json({ ok: true });
+});
+
+// Restore a soft-deleted order record.
+admin.post("/orders/:orderId/restore", async (c) => {
+  const orderId = c.req.param("orderId");
+  const existing = await prisma.eggOrder.findUnique({ where: { id: orderId }, select: { id: true } });
+  if (!existing) return c.json({ error: "order not found" }, 404);
+  await prisma.eggOrder.update({ where: { id: orderId }, data: { deletedAt: null } });
+  console.log(`[admin] order restored ${orderId}`);
   return c.json({ ok: true });
 });
 
@@ -504,7 +673,7 @@ admin.get("/stats", async (c) => {
     prisma.subscription.count({ where: { status: "ACTIVE" } }),
     prisma.post.count({ where: { deletedAt: null } }),
     prisma.post.count({ where: { deletedAt: null, rating: { not: null } } }),
-    prisma.eggOrder.aggregate({ _sum: { eggs: true } }),
+    prisma.eggOrder.aggregate({ where: { deletedAt: null }, _sum: { eggs: true } }),
   ]);
   return c.json({
     totalUsers,

@@ -13,7 +13,7 @@ import type { Gender } from "../generated/prisma/client";
 // ─────────────────────────────────────────────────────────────
 
 const GENDERS: Gender[] = ["MALE", "FEMALE", "NONBINARY", "UNDISCLOSED"];
-const ANIMALS = ["CHICKEN", "DOG", "GOOSE"] as const;
+const ANIMALS = ["CHICKEN", "DOG", "GOOSE", "DUCK", "CAT", "LIZARD"] as const;
 type AnimalName = (typeof ANIMALS)[number];
 
 function sanitizeUsername(raw: string): string {
