@@ -6,6 +6,7 @@ import {
   escapeHtml,
   colors,
 } from "./layout";
+import { pluralizeAnimal } from "../utils/animal-grammar";
 
 // ─────────────────────────────────────────────────────────────
 // EMAIL TEMPLATES — pure functions: data in, { subject, html, text } out.
@@ -126,13 +127,17 @@ export function magicLinkEmail(input: {
   animal?: string;
 }): RenderedEmail {
   const subject = "Welcome to ourlittlefarm! Your sign-in link";
-  const animal = input.animal ? escapeHtml(input.animal.toLowerCase()) : null;
+  // Pluralized ("one of the geese"), not "<animal>s" — irregular plurals
+  // live in pluralizeAnimal so GOOSE doesn't render as "gooses".
+  const animals = input.animal
+    ? escapeHtml(pluralizeAnimal(input.animal))
+    : null;
 
   // When we know their animal, the email doubles as a friendly welcome: here's
   // your handle + the critter the farm review community rolled for you.
-  const identityLine = animal
+  const identityLine = animals
     ? paragraph(
-        `The farm review community assigned you a handle: <b>${escapeHtml(input.username)}</b> — one of the <b>${animal}</b>s 🥚 on our farm. You can reroll later in settings.`,
+        `The farm review community assigned you a handle: <b>${escapeHtml(input.username)}</b> — one of the <b>${animals}</b> 🥚 on our farm. You can reroll later in settings.`,
       )
     : "";
 
@@ -150,7 +155,7 @@ export function magicLinkEmail(input: {
   );
 
   const text = `An account was created for you on ourlittlefarm, ${input.username}:${
-    animal ? `\n\nThe farm review community assigned you a handle: ${input.username} — one of the ${animal}s on our farm. You can reroll later in settings.` : ""
+    animals ? `\n\nThe farm review community assigned you a handle: ${input.username} — one of the ${pluralizeAnimal(input.animal!)} on our farm. You can reroll later in settings.` : ""
   }\n\n${input.url}\n\nThe link is single-use and expires shortly. Didn't ask to sign in? Ignore this email.`;
 
   return { subject, html, text };
