@@ -24,6 +24,15 @@ export const auth = betterAuth({
     // FE. Same source as the CORS origins so the two never drift apart.
     trustedOrigins: allowedOrigins(),
     advanced: {
+        // Where to read the client IP for rate limiting. Railway (and most
+        // proxies) forward it in `x-forwarded-for`; `x-real-ip` is a common
+        // fallback. In dev there's no proxy, so index.ts fills x-forwarded-for
+        // from Bun's socket IP before the request reaches the auth handler —
+        // otherwise Better Auth can't find an IP and logs the "rate limiting
+        // skipped" warning.
+        ipAddress: {
+            ipAddressHeaders: ["x-forwarded-for", "x-real-ip"],
+        },
         ...(process.env.NODE_ENV === "production" ? {
             crossSubDomainCookies: {
                 enabled: true,
